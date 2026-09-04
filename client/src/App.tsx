@@ -1,5 +1,6 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+// ✅ Đã đổi BrowserRouter -> HashRouter để tương thích với Android WebView
+import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
 import { HomePage } from './pages/HomePage';
 import { RoomDetailPage } from './pages/RoomDetailPage';
