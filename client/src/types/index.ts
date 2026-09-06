@@ -1,17 +1,94 @@
+export type RoleName = 'ADMIN' | 'TECHNICIAN' | 'TEACHER' | 'STUDENT';
+
 export interface Role {
   id: number;
-  role_name: 'ADMIN' | 'TECHNICIAN' | 'TEACHER' | 'STUDENT';
+  role_name: RoleName;
   description: string;
 }
 
+export type Permission = 
+  | 'MANAGE_DEVICES'
+  | 'MANAGE_ROOMS'
+  | 'VIEW_REPORTS'
+  | 'ASSIGN_REPORTS'
+  | 'RESOLVE_REPORTS'
+  | 'GRANT_PERMISSIONS'
+  | 'CREATE_REPORT';
+
+export const ALL_PERMISSIONS: Permission[] = [
+  'MANAGE_DEVICES',
+  'MANAGE_ROOMS',
+  'VIEW_REPORTS',
+  'ASSIGN_REPORTS',
+  'RESOLVE_REPORTS',
+  'GRANT_PERMISSIONS',
+  'CREATE_REPORT'
+];
+
+export const PERMISSION_LABELS: Record<Permission, string> = {
+  MANAGE_DEVICES: 'Thêm / Sửa / Quản lý thiết bị',
+  MANAGE_ROOMS: 'Quản lý phòng học & Sơ đồ',
+  VIEW_REPORTS: 'Xem danh sách báo hỏng sự cố',
+  ASSIGN_REPORTS: 'Phân công kỹ thuật viên',
+  RESOLVE_REPORTS: 'Cập nhật & Xử lý hoàn tất sự cố',
+  GRANT_PERMISSIONS: 'Quản trị viên & Phân quyền RBAC',
+  CREATE_REPORT: 'Gửi phiếu báo hỏng thiết bị'
+};
+
+export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, Permission[]> = {
+  ADMIN: [
+    'MANAGE_DEVICES',
+    'MANAGE_ROOMS',
+    'VIEW_REPORTS',
+    'ASSIGN_REPORTS',
+    'RESOLVE_REPORTS',
+    'GRANT_PERMISSIONS',
+    'CREATE_REPORT'
+  ],
+  TECHNICIAN: [
+    'MANAGE_DEVICES',
+    'VIEW_REPORTS',
+    'RESOLVE_REPORTS',
+    'CREATE_REPORT'
+  ],
+  TEACHER: [
+    'VIEW_REPORTS',
+    'CREATE_REPORT'
+  ],
+  STUDENT: [
+    'CREATE_REPORT'
+  ]
+};
+
 export interface User {
   id: number;
-  role_name: 'ADMIN' | 'TECHNICIAN' | 'TEACHER' | 'STUDENT';
+  username: string;
+  role_name: RoleName;
   full_name: string;
   email: string;
   phone: string;
   avatar_url?: string;
+  permissions: Permission[];
   created_at: string;
+}
+
+export interface LoginPayload {
+  username: string;
+  password: string;
+}
+
+export interface RegisterPayload {
+  username: string;
+  password: string;
+  full_name: string;
+  email: string;
+  phone?: string;
+  role_name?: RoleName;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: User;
 }
 
 export interface CampusPOI {

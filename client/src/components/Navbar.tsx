@@ -9,8 +9,12 @@ import {
   School,
   MapPin,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  LogIn,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 interface NavbarProps {
   isTechnicianMode?: boolean;
@@ -22,6 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleTechnicianMode
 }) => {
   const location = useLocation();
+  const { user, isAuthenticated, logout } = useAuth();
 
   const navItems = [
     { path: '/', label: 'Bản đồ & Sơ đồ Tầng', icon: MapPin },
@@ -50,7 +55,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </Link>
 
           {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden lg:flex items-center gap-1">
             {navItems.map(item => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
@@ -73,47 +78,55 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Role Switcher Button */}
+          {/* User Profile & Auth Controls */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {onToggleTechnicianMode && (
-              <button
-                onClick={onToggleTechnicianMode}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
-                  isTechnicianMode
-                    ? 'bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100'
-                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                }`}
-                title="Chuyển đổi giao diện Sinh viên / Kỹ thuật viên"
-              >
-                {isTechnicianMode ? (
-                  <>
-                    <ShieldCheck className="w-4 h-4 text-rose-600" />
-                    <span className="hidden sm:inline">Chế độ: Kỹ thuật viên</span>
-                    <span className="sm:hidden">KTV</span>
-                  </>
-                ) : (
-                  <>
-                    <UserCheck className="w-4 h-4 text-sky-600" />
-                    <span className="hidden sm:inline">Chế độ: Sinh viên</span>
-                    <span className="sm:hidden">Học sinh</span>
-                  </>
-                )}
-              </button>
+            {isAuthenticated && user ? (
+              <div className="flex items-center gap-2">
+                <div className="hidden lg:flex flex-col text-right">
+                  <span className="text-xs font-bold text-slate-900 leading-none">{user.full_name || user.username}</span>
+                  <span className="text-[10px] font-semibold text-sky-600 mt-0.5">
+                    {user.role_name === 'ADMIN' ? 'Quản Trị Viên' : user.role_name === 'TECHNICIAN' ? 'Kỹ Thuật Viên' : user.role_name === 'TEACHER' ? 'Giảng Viên' : 'Sinh Viên'}
+                  </span>
+                </div>
+
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                  {user.full_name ? user.full_name.charAt(0).toUpperCase() : 'U'}
+                </div>
+
+                <button
+                  onClick={logout}
+                  className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                  title="Đăng xuất"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Thoát</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <Link
+                  to="/login"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-all shadow-sm shadow-sky-600/25"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Đăng Nhập</span>
+                </Link>
+              </div>
             )}
 
             <Link
               to="/qr-scanner"
-              className="md:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-semibold shadow-sm"
+              className="lg:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-semibold shadow-sm"
             >
               <QrCode className="w-4 h-4" />
-              <span>Quét QR</span>
+              <span>QR</span>
             </Link>
           </div>
         </div>
       </div>
 
       {/* Mobile Bottom Navigation Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200 px-3 py-2 flex justify-around shadow-lg">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200 px-2 py-2 flex justify-around shadow-lg safe-area-bottom">
         {navItems.map(item => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));

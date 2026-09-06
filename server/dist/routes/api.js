@@ -8,6 +8,7 @@ const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const qrcode_1 = __importDefault(require("qrcode"));
 const db_1 = require("../data/db");
+const auth_1 = require("./auth");
 const router = (0, express_1.Router)();
 // Multer configuration for file uploads
 const storage = multer_1.default.diskStorage({
@@ -91,7 +92,7 @@ router.get('/devices/qr/:qrCode', (req, res) => {
     const detailedDev = db_1.Database.getDeviceById(dev.id);
     res.json({ success: true, data: detailedDev });
 });
-router.post('/devices', (req, res) => {
+router.post('/devices', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
     try {
         const { room_id, category_id, device_code, name, model, serial_number, is_portable, purchase_date, warranty_expiry, specifications } = req.body;
         const qr_code = `QR-DEV-${device_code.toUpperCase()}`;
@@ -115,7 +116,7 @@ router.post('/devices', (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-router.patch('/devices/:id/status', (req, res) => {
+router.patch('/devices/:id/status', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
     const devId = parseInt(req.params.id);
     const { status } = req.body;
     const updated = db_1.Database.updateDeviceStatus(devId, status);
@@ -123,6 +124,42 @@ router.patch('/devices/:id/status', (req, res) => {
         return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
     }
     res.json({ success: true, data: updated });
+});
+router.patch('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
+    try {
+        const devId = parseInt(req.params.id);
+        const { room_id, category_id, device_code, name, model, serial_number, status, is_portable, purchase_date, warranty_expiry, specifications } = req.body;
+        const allowedStatuses = ['ACTIVE', 'DAMAGED', 'UNDER_MAINTENANCE', 'LIQUIDATED'];
+        if (status && !allowedStatuses.includes(status)) {
+            return res.status(400).json({ success: false, message: 'Trạng thái thiết bị không hợp lệ' });
+        }
+        const updated = db_1.Database.updateDevice(devId, {
+            room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
+            category_id: category_id === undefined ? undefined : parseInt(category_id),
+            device_code,
+            name,
+            model,
+            serial_number,
+            status,
+            is_portable,
+            purchase_date,
+            warranty_expiry,
+            specifications,
+            qr_code: device_code ? `QR-DEV-${device_code.toUpperCase()}` : undefined
+        });
+        if (!updated)
+            return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+        return res.json({ success: true, data: updated });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+router.delete('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
+    const deleted = db_1.Database.deleteDevice(parseInt(req.params.id));
+    if (!deleted)
+        return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+    return res.json({ success: true, message: 'Đã xóa thiết bị' });
 });
 // ================= MANUALS & FAQS =================
 router.get('/manuals', (req, res) => {
@@ -156,9 +193,15 @@ router.get('/incident-reports', (req, res) => {
     const reports = db_1.Database.getIncidentReports(status, roomId);
     res.json({ success: true, data: reports });
 });
-router.post('/incident-reports', upload.array('images', 5), (req, res) => {
+router.post('/incident-reports', auth_1.optionalAuth, upload.array('images', 5), (req, res) => {
     try {
-        const { room_id, device_id, reporter_name, reporter_phone, reporter_role, title, description, priority } = req.body;
+        const { room_id, device_id, title, description, priority } = req.body;
+        let { reporter_name, reporter_phone, reporter_role } = req.body;
+        if (req.user) {
+            reporter_name = reporter_name || req.user.full_name;
+            reporter_phone = reporter_phone || req.user.phone || '';
+            reporter_role = reporter_role || (req.user.role_name === 'TEACHER' ? 'Giảng viên' : req.user.role_name === 'STUDENT' ? 'Sinh viên' : 'Kỹ thuật viên');
+        }
         if (!room_id || !title || !description || !reporter_name) {
             return res.status(400).json({ success: false, message: 'Vui lòng điền đầy đủ các thông tin bắt buộc' });
         }
@@ -185,10 +228,11 @@ router.post('/incident-reports', upload.array('images', 5), (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-router.patch('/incident-reports/:id/status', (req, res) => {
+router.patch('/incident-reports/:id/status', auth_1.authenticateToken, (0, auth_1.requirePermission)('RESOLVE_REPORTS'), (req, res) => {
     const reportId = parseInt(req.params.id);
     const { status, technician_name, solution_note } = req.body;
-    const updated = db_1.Database.updateIncidentStatus(reportId, status, technician_name, solution_note);
+    const tech = technician_name || (req.user ? req.user.full_name : undefined);
+    const updated = db_1.Database.updateIncidentStatus(reportId, status, tech, solution_note);
     if (!updated) {
         return res.status(404).json({ success: false, message: 'Phiếu báo hỏng không tồn tại' });
     }
@@ -197,7 +241,7 @@ router.patch('/incident-reports/:id/status', (req, res) => {
         db_1.Database.addMaintenanceLog({
             report_id: reportId,
             device_id: updated.device_id,
-            technician_name: technician_name || 'Kỹ thuật viên CSVC',
+            technician_name: tech || 'Kỹ thuật viên CSVC',
             action_taken: solution_note || 'Đã sửa chữa và kiểm tra hoạt động ổn định',
             parts_replaced: '',
             cost: 0,
@@ -211,15 +255,16 @@ router.get('/maintenance-logs', (req, res) => {
     const logs = db_1.Database.getMaintenanceLogs();
     res.json({ success: true, data: logs });
 });
-router.post('/maintenance-logs', (req, res) => {
+router.post('/maintenance-logs', auth_1.authenticateToken, (0, auth_1.requirePermission)('RESOLVE_REPORTS'), (req, res) => {
     const { report_id, device_id, technician_name, action_taken, parts_replaced, cost, note } = req.body;
-    if (!device_id || !technician_name || !action_taken) {
+    const tech = technician_name || (req.user ? req.user.full_name : '');
+    if (!device_id || !tech || !action_taken) {
         return res.status(400).json({ success: false, message: 'Thiếu thông tin bảo trì bắt buộc' });
     }
     const log = db_1.Database.addMaintenanceLog({
         report_id: report_id ? parseInt(report_id) : null,
         device_id: parseInt(device_id),
-        technician_name,
+        technician_name: tech,
         action_taken,
         parts_replaced: parts_replaced || '',
         cost: cost ? parseFloat(cost) : 0,

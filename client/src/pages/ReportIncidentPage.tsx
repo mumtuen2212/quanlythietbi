@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { 
   AlertTriangle, 
@@ -10,14 +10,19 @@ import {
   Phone,
   User,
   Building2,
-  Cpu
+  Cpu,
+  Camera,
+  RefreshCw,
+  VideoOff
 } from 'lucide-react';
 import { ApiService } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Room, Device, IncidentReport } from '../types';
 
 export const ReportIncidentPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -34,9 +39,24 @@ export const ReportIncidentPage: React.FC = () => {
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
 
+  // Live Camera Preview States
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [successReport, setSuccessReport] = useState<IncidentReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      setReporterName(user.full_name || user.username);
+      if (user.phone) setReporterPhone(user.phone);
+      setReporterRole(user.role_name === 'TEACHER' ? 'Giảng viên' : user.role_name === 'STUDENT' ? 'Sinh viên' : 'Kỹ thuật viên');
+    }
+  }, [user]);
 
   useEffect(() => {
     loadInitialData();
@@ -75,6 +95,75 @@ export const ReportIncidentPage: React.FC = () => {
       console.error('Error loading devices for room:', err);
     }
   };
+
+  const startCamera = async (facing: 'environment' | 'user' = cameraFacing) => {
+    try {
+      setCameraError(null);
+      setIsCameraOpen(true);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: facing,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+    } catch (err: any) {
+      console.error('Camera access error:', err);
+      setCameraError('Không thể mở camera. Vui lòng cấp quyền truy cập camera trong trình duyệt hoặc sử dụng nút tải ảnh.');
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraOpen(false);
+    setCameraError(null);
+  };
+
+  const toggleCameraFacing = () => {
+    const nextFacing = cameraFacing === 'environment' ? 'user' : 'environment';
+    setCameraFacing(nextFacing);
+    startCamera(nextFacing);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (blob) {
+        const file = new File([blob], `camera-snap-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        setSelectedImages(prev => [...prev, file]);
+        const url = URL.createObjectURL(blob);
+        setPreviewUrls(prev => [...prev, url]);
+      }
+      stopCamera();
+    }, 'image/jpeg', 0.9);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -282,22 +371,46 @@ export const ReportIncidentPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Image Upload */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700">Ảnh chụp minh chứng hỏng hóc (Tối đa 5 ảnh)</label>
-              <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-200 hover:border-sky-400 rounded-2xl cursor-pointer bg-slate-50/50 hover:bg-sky-50/20 transition-all">
-                <Upload className="w-6 h-6 text-slate-400 mb-1" />
-                <span className="text-xs font-semibold text-slate-600">Bấm để chụp ảnh hoặc tải ảnh từ máy</span>
-                <span className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, JPEG (tối đa 10MB)</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handleImageChange}
-                  className="hidden"
-                />
+            {/* Image Upload & Camera Capture */}
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-700 block">
+                Ảnh chụp minh chứng hỏng hóc (Tối đa 5 ảnh)
               </label>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Camera Capture Button */}
+                <button
+                  type="button"
+                  onClick={() => startCamera('environment')}
+                  className="flex items-center justify-center gap-2 p-3.5 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white font-bold text-xs shadow-sm shadow-sky-500/25 transition-all cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Chụp ảnh sự cố bằng Camera</span>
+                </button>
+
+                {/* File Upload Trigger */}
+                <label className="flex items-center justify-center gap-2 p-3.5 border-2 border-dashed border-slate-200 hover:border-sky-400 rounded-2xl cursor-pointer bg-slate-50/50 hover:bg-sky-50/20 text-slate-600 hover:text-sky-700 font-bold text-xs transition-all text-center">
+                  <Upload className="w-4 h-4 text-slate-400" />
+                  <span>Tải ảnh có sẵn từ máy</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleImageChange}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              {/* Camera Error Alert */}
+              {cameraError && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                  <span>{cameraError}</span>
+                </div>
+              )}
+
+              {/* Preview Gallery */}
               {previewUrls.length > 0 && (
                 <div className="flex flex-wrap gap-3 pt-2">
                   {previewUrls.map((url, idx) => (
@@ -306,7 +419,7 @@ export const ReportIncidentPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => removeImage(idx)}
-                        className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100"
+                        className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full opacity-90 hover:opacity-100 cursor-pointer shadow-sm"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -315,6 +428,75 @@ export const ReportIncidentPage: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Live Camera Viewfinder Modal */}
+            {isCameraOpen && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="relative w-full max-w-lg bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-700 flex flex-col">
+                  {/* Camera Header */}
+                  <div className="flex items-center justify-between p-4 bg-slate-800/80 border-b border-slate-700 text-white">
+                    <div className="flex items-center gap-2 font-bold text-sm">
+                      <Camera className="w-4 h-4 text-sky-400" />
+                      <span>Khung ngắm Camera trực tiếp</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="p-1.5 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Video Viewfinder */}
+                  <div className="relative aspect-[4/3] bg-black flex items-center justify-center overflow-hidden">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+
+                    {/* Target Reticle */}
+                    <div className="absolute inset-8 border-2 border-white/30 rounded-2xl pointer-events-none flex items-center justify-center">
+                      <div className="w-10 h-10 border-2 border-sky-400/60 rounded-full animate-ping" />
+                    </div>
+                  </div>
+
+                  {/* Camera Controls Footer */}
+                  <div className="p-4 bg-slate-800 flex items-center justify-between gap-4">
+                    <button
+                      type="button"
+                      onClick={toggleCameraFacing}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition-all cursor-pointer"
+                      title="Chuyển Camera Trước / Sau"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      <span className="hidden sm:inline">Đổi camera</span>
+                    </button>
+
+                    {/* Shutter Button */}
+                    <button
+                      type="button"
+                      onClick={capturePhoto}
+                      className="w-14 h-14 rounded-full bg-white border-4 border-sky-500 hover:scale-105 active:scale-95 transition-all shadow-lg flex items-center justify-center cursor-pointer"
+                      title="Bấm để chụp ảnh"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-sky-600" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Submit Button */}

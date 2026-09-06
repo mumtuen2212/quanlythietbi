@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Database = void 0;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const types_1 = require("./types");
 const DB_FILE = path_1.default.join(__dirname, 'database.json');
 const INITIAL_DATA = {
     pois: [
@@ -523,17 +525,73 @@ Nếu màn hình tay mic sáng nhưng đầu thu không nhận tín hiệu (Cộ
         }
     ],
     users: [
-        { id: 1, role_name: 'ADMIN', full_name: 'Quản trị viên Hệ thống (Admin)', email: 'admin@school.edu.vn', phone: '0909.000.001', created_at: '2024-01-01' },
-        { id: 2, role_name: 'TECHNICIAN', full_name: 'KTV. Trần Minh Quang', email: 'quang.tm@school.edu.vn', phone: '0909.000.002', created_at: '2024-01-01' },
-        { id: 3, role_name: 'TEACHER', full_name: 'ThS. Nguyễn Văn Hùng', email: 'hung.nv@school.edu.vn', phone: '0912.345.678', created_at: '2024-01-01' }
+        {
+            id: 1,
+            username: 'admin',
+            role_name: 'ADMIN',
+            full_name: 'Quản trị viên Hệ thống (Admin)',
+            email: 'admin@school.edu.vn',
+            phone: '0909.000.001',
+            password_hash: bcryptjs_1.default.hashSync('admin123', 10),
+            permissions: types_1.DEFAULT_ROLE_PERMISSIONS.ADMIN,
+            created_at: '2024-01-01'
+        },
+        {
+            id: 2,
+            username: 'technician',
+            role_name: 'TECHNICIAN',
+            full_name: 'KTV. Trần Minh Quang',
+            email: 'quang.tm@school.edu.vn',
+            phone: '0909.000.002',
+            password_hash: bcryptjs_1.default.hashSync('tech123', 10),
+            permissions: types_1.DEFAULT_ROLE_PERMISSIONS.TECHNICIAN,
+            created_at: '2024-01-01'
+        },
+        {
+            id: 3,
+            username: 'teacher',
+            role_name: 'TEACHER',
+            full_name: 'ThS. Nguyễn Văn Hùng',
+            email: 'hung.nv@school.edu.vn',
+            phone: '0912.345.678',
+            password_hash: bcryptjs_1.default.hashSync('teacher123', 10),
+            permissions: types_1.DEFAULT_ROLE_PERMISSIONS.TEACHER,
+            created_at: '2024-01-01'
+        },
+        {
+            id: 4,
+            username: 'student',
+            role_name: 'STUDENT',
+            full_name: 'Sinh viên Nguyễn Văn An',
+            email: 'an.nv@student.school.edu.vn',
+            phone: '0987.654.321',
+            password_hash: bcryptjs_1.default.hashSync('student123', 10),
+            permissions: types_1.DEFAULT_ROLE_PERMISSIONS.STUDENT,
+            created_at: '2024-01-01'
+        }
     ]
 };
 class Database {
     static data = INITIAL_DATA;
     static init() {
         try {
-            this.data = INITIAL_DATA;
-            this.save();
+            if (fs_1.default.existsSync(DB_FILE)) {
+                const fileContent = fs_1.default.readFileSync(DB_FILE, 'utf8');
+                const parsed = JSON.parse(fileContent);
+                // If file exists and already has hashed users, use it; otherwise re-seed users
+                if (parsed && Array.isArray(parsed.users) && parsed.users.length > 0 && parsed.users[0].password_hash) {
+                    this.data = parsed;
+                }
+                else {
+                    parsed.users = INITIAL_DATA.users;
+                    this.data = parsed;
+                    this.save();
+                }
+            }
+            else {
+                this.data = INITIAL_DATA;
+                this.save();
+            }
         }
         catch (e) {
             console.warn('Using in-memory database backup:', e);
@@ -638,6 +696,27 @@ class Database {
             return dev;
         }
         return null;
+    }
+    static updateDevice(id, payload) {
+        const device = this.data.devices.find(d => d.id === id);
+        if (!device)
+            return null;
+        Object.assign(device, payload);
+        this.save();
+        return device;
+    }
+    static deleteDevice(id) {
+        const deviceIndex = this.data.devices.findIndex(d => d.id === id);
+        if (deviceIndex === -1)
+            return false;
+        this.data.devices.splice(deviceIndex, 1);
+        this.data.maintenance_logs = this.data.maintenance_logs.filter(log => log.device_id !== id);
+        this.data.incident_reports.forEach(report => {
+            if (report.device_id === id)
+                report.device_id = null;
+        });
+        this.save();
+        return true;
     }
     static getManuals() {
         return this.data.manuals;
@@ -747,6 +826,107 @@ class Database {
             resolvedReports,
             deviceHealthRatio: totalDevices ? Math.round((activeDevices / totalDevices) * 100) : 100
         };
+    }
+    // ================= USER & AUTH & RBAC =================
+    static getUsers() {
+        return this.data.users.map(({ password_hash, ...u }) => ({
+            ...u,
+            permissions: u.permissions || types_1.DEFAULT_ROLE_PERMISSIONS[u.role_name] || []
+        }));
+    }
+    static getUserById(id) {
+        const user = this.data.users.find(u => u.id === id);
+        if (!user)
+            return null;
+        return {
+            ...user,
+            permissions: user.permissions || types_1.DEFAULT_ROLE_PERMISSIONS[user.role_name] || []
+        };
+    }
+    static getUserByUsername(username) {
+        const user = this.data.users.find(u => u.username?.toLowerCase() === username.toLowerCase());
+        if (!user)
+            return null;
+        return {
+            ...user,
+            permissions: user.permissions || types_1.DEFAULT_ROLE_PERMISSIONS[user.role_name] || []
+        };
+    }
+    static getUserByEmail(email) {
+        const user = this.data.users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+        if (!user)
+            return null;
+        return {
+            ...user,
+            permissions: user.permissions || types_1.DEFAULT_ROLE_PERMISSIONS[user.role_name] || []
+        };
+    }
+    static createUser(payload) {
+        const newId = this.data.users.length ? Math.max(...this.data.users.map(u => u.id)) + 1 : 1;
+        const role = payload.role_name || 'STUDENT';
+        const permissions = payload.permissions && payload.permissions.length > 0
+            ? payload.permissions
+            : types_1.DEFAULT_ROLE_PERMISSIONS[role] || [];
+        const newUser = {
+            id: newId,
+            username: payload.username.trim(),
+            password_hash: payload.password_hash,
+            role_name: role,
+            full_name: payload.full_name.trim(),
+            email: payload.email.trim(),
+            phone: payload.phone ? payload.phone.trim() : '',
+            permissions,
+            created_at: new Date().toISOString().replace('T', ' ').slice(0, 19)
+        };
+        this.data.users.push(newUser);
+        this.save();
+        return newUser;
+    }
+    static updateUserPermissions(userId, permissions) {
+        const user = this.data.users.find(u => u.id === userId);
+        if (!user)
+            return null;
+        user.permissions = permissions;
+        this.save();
+        return user;
+    }
+    static updateUserRole(userId, role_name, permissions) {
+        const user = this.data.users.find(u => u.id === userId);
+        if (!user)
+            return null;
+        user.role_name = role_name;
+        user.permissions = permissions || types_1.DEFAULT_ROLE_PERMISSIONS[role_name] || [];
+        this.save();
+        return user;
+    }
+    static updateUser(userId, payload) {
+        const user = this.data.users.find(u => u.id === userId);
+        if (!user)
+            return null;
+        if (payload.full_name !== undefined)
+            user.full_name = payload.full_name.trim();
+        if (payload.email !== undefined)
+            user.email = payload.email.trim();
+        if (payload.phone !== undefined)
+            user.phone = payload.phone.trim();
+        if (payload.password_hash)
+            user.password_hash = payload.password_hash;
+        if (payload.role_name)
+            user.role_name = payload.role_name;
+        if (payload.permissions)
+            user.permissions = payload.permissions;
+        else if (payload.role_name)
+            user.permissions = types_1.DEFAULT_ROLE_PERMISSIONS[payload.role_name] || [];
+        this.save();
+        return user;
+    }
+    static deleteUser(userId) {
+        const userIndex = this.data.users.findIndex(u => u.id === userId);
+        if (userIndex === -1)
+            return false;
+        this.data.users.splice(userIndex, 1);
+        this.save();
+        return true;
     }
 }
 exports.Database = Database;

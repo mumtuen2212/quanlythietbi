@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 import {
   Building,
   Room,
@@ -9,7 +10,10 @@ import {
   IncidentReport,
   MaintenanceLog,
   User,
-  CampusPOI
+  CampusPOI,
+  RoleName,
+  Permission,
+  DEFAULT_ROLE_PERMISSIONS
 } from './types';
 
 interface DatabaseSchema {
@@ -542,9 +546,50 @@ Nếu màn hình tay mic sáng nhưng đầu thu không nhận tín hiệu (Cộ
     }
   ],
   users: [
-    { id: 1, role_name: 'ADMIN', full_name: 'Quản trị viên Hệ thống (Admin)', email: 'admin@school.edu.vn', phone: '0909.000.001', created_at: '2024-01-01' },
-    { id: 2, role_name: 'TECHNICIAN', full_name: 'KTV. Trần Minh Quang', email: 'quang.tm@school.edu.vn', phone: '0909.000.002', created_at: '2024-01-01' },
-    { id: 3, role_name: 'TEACHER', full_name: 'ThS. Nguyễn Văn Hùng', email: 'hung.nv@school.edu.vn', phone: '0912.345.678', created_at: '2024-01-01' }
+    { 
+      id: 1, 
+      username: 'admin', 
+      role_name: 'ADMIN', 
+      full_name: 'Quản trị viên Hệ thống (Admin)', 
+      email: 'admin@school.edu.vn', 
+      phone: '0909.000.001', 
+      password_hash: bcrypt.hashSync('admin123', 10),
+      permissions: DEFAULT_ROLE_PERMISSIONS.ADMIN,
+      created_at: '2024-01-01' 
+    },
+    { 
+      id: 2, 
+      username: 'technician', 
+      role_name: 'TECHNICIAN', 
+      full_name: 'KTV. Trần Minh Quang', 
+      email: 'quang.tm@school.edu.vn', 
+      phone: '0909.000.002', 
+      password_hash: bcrypt.hashSync('tech123', 10),
+      permissions: DEFAULT_ROLE_PERMISSIONS.TECHNICIAN,
+      created_at: '2024-01-01' 
+    },
+    { 
+      id: 3, 
+      username: 'teacher', 
+      role_name: 'TEACHER', 
+      full_name: 'ThS. Nguyễn Văn Hùng', 
+      email: 'hung.nv@school.edu.vn', 
+      phone: '0912.345.678', 
+      password_hash: bcrypt.hashSync('teacher123', 10),
+      permissions: DEFAULT_ROLE_PERMISSIONS.TEACHER,
+      created_at: '2024-01-01' 
+    },
+    { 
+      id: 4, 
+      username: 'student', 
+      role_name: 'STUDENT', 
+      full_name: 'Sinh viên Nguyễn Văn An', 
+      email: 'an.nv@student.school.edu.vn', 
+      phone: '0987.654.321', 
+      password_hash: bcrypt.hashSync('student123', 10),
+      permissions: DEFAULT_ROLE_PERMISSIONS.STUDENT,
+      created_at: '2024-01-01' 
+    }
   ]
 };
 
@@ -553,8 +598,21 @@ export class Database {
 
   public static init() {
     try {
-      this.data = INITIAL_DATA;
-      this.save();
+      if (fs.existsSync(DB_FILE)) {
+        const fileContent = fs.readFileSync(DB_FILE, 'utf8');
+        const parsed = JSON.parse(fileContent);
+        // If file exists and already has hashed users, use it; otherwise re-seed users
+        if (parsed && Array.isArray(parsed.users) && parsed.users.length > 0 && parsed.users[0].password_hash) {
+          this.data = parsed;
+        } else {
+          parsed.users = INITIAL_DATA.users;
+          this.data = parsed;
+          this.save();
+        }
+      } else {
+        this.data = INITIAL_DATA;
+        this.save();
+      }
     } catch (e) {
       console.warn('Using in-memory database backup:', e);
       this.data = INITIAL_DATA;
@@ -672,6 +730,28 @@ export class Database {
       return dev;
     }
     return null;
+  }
+
+  public static updateDevice(id: number, payload: Partial<Omit<Device, 'id'>>): Device | null {
+    const device = this.data.devices.find(d => d.id === id);
+    if (!device) return null;
+
+    Object.assign(device, payload);
+    this.save();
+    return device;
+  }
+
+  public static deleteDevice(id: number): boolean {
+    const deviceIndex = this.data.devices.findIndex(d => d.id === id);
+    if (deviceIndex === -1) return false;
+
+    this.data.devices.splice(deviceIndex, 1);
+    this.data.maintenance_logs = this.data.maintenance_logs.filter(log => log.device_id !== id);
+    this.data.incident_reports.forEach(report => {
+      if (report.device_id === id) report.device_id = null;
+    });
+    this.save();
+    return true;
   }
 
   public static getManuals(): Manual[] {
@@ -810,6 +890,127 @@ export class Database {
       resolvedReports,
       deviceHealthRatio: totalDevices ? Math.round((activeDevices / totalDevices) * 100) : 100
     };
+  }
+
+  // ================= USER & AUTH & RBAC =================
+  public static getUsers(): Omit<User, 'password_hash'>[] {
+    return this.data.users.map(({ password_hash, ...u }) => ({
+      ...u,
+      permissions: u.permissions || DEFAULT_ROLE_PERMISSIONS[u.role_name] || []
+    }));
+  }
+
+  public static getUserById(id: number): User | null {
+    const user = this.data.users.find(u => u.id === id);
+    if (!user) return null;
+    return {
+      ...user,
+      permissions: user.permissions || DEFAULT_ROLE_PERMISSIONS[user.role_name] || []
+    };
+  }
+
+  public static getUserByUsername(username: string): User | null {
+    const user = this.data.users.find(
+      u => u.username?.toLowerCase() === username.toLowerCase()
+    );
+    if (!user) return null;
+    return {
+      ...user,
+      permissions: user.permissions || DEFAULT_ROLE_PERMISSIONS[user.role_name] || []
+    };
+  }
+
+  public static getUserByEmail(email: string): User | null {
+    const user = this.data.users.find(
+      u => u.email?.toLowerCase() === email.toLowerCase()
+    );
+    if (!user) return null;
+    return {
+      ...user,
+      permissions: user.permissions || DEFAULT_ROLE_PERMISSIONS[user.role_name] || []
+    };
+  }
+
+  public static createUser(payload: {
+    username: string;
+    password_hash: string;
+    full_name: string;
+    email: string;
+    phone?: string;
+    role_name?: RoleName;
+    permissions?: Permission[];
+  }): User {
+    const newId = this.data.users.length ? Math.max(...this.data.users.map(u => u.id)) + 1 : 1;
+    const role: RoleName = payload.role_name || 'STUDENT';
+    const permissions = payload.permissions && payload.permissions.length > 0
+      ? payload.permissions
+      : DEFAULT_ROLE_PERMISSIONS[role] || [];
+
+    const newUser: User = {
+      id: newId,
+      username: payload.username.trim(),
+      password_hash: payload.password_hash,
+      role_name: role,
+      full_name: payload.full_name.trim(),
+      email: payload.email.trim(),
+      phone: payload.phone ? payload.phone.trim() : '',
+      permissions,
+      created_at: new Date().toISOString().replace('T', ' ').slice(0, 19)
+    };
+
+    this.data.users.push(newUser);
+    this.save();
+    return newUser;
+  }
+
+  public static updateUserPermissions(userId: number, permissions: Permission[]): User | null {
+    const user = this.data.users.find(u => u.id === userId);
+    if (!user) return null;
+
+    user.permissions = permissions;
+    this.save();
+    return user;
+  }
+
+  public static updateUserRole(userId: number, role_name: RoleName, permissions?: Permission[]): User | null {
+    const user = this.data.users.find(u => u.id === userId);
+    if (!user) return null;
+
+    user.role_name = role_name;
+    user.permissions = permissions || DEFAULT_ROLE_PERMISSIONS[role_name] || [];
+    this.save();
+    return user;
+  }
+
+  public static updateUser(userId: number, payload: {
+    full_name?: string;
+    email?: string;
+    phone?: string;
+    password_hash?: string;
+    role_name?: RoleName;
+    permissions?: Permission[];
+  }): User | null {
+    const user = this.data.users.find(u => u.id === userId);
+    if (!user) return null;
+
+    if (payload.full_name !== undefined) user.full_name = payload.full_name.trim();
+    if (payload.email !== undefined) user.email = payload.email.trim();
+    if (payload.phone !== undefined) user.phone = payload.phone.trim();
+    if (payload.password_hash) user.password_hash = payload.password_hash;
+    if (payload.role_name) user.role_name = payload.role_name;
+    if (payload.permissions) user.permissions = payload.permissions;
+    else if (payload.role_name) user.permissions = DEFAULT_ROLE_PERMISSIONS[payload.role_name] || [];
+
+    this.save();
+    return user;
+  }
+
+  public static deleteUser(userId: number): boolean {
+    const userIndex = this.data.users.findIndex(u => u.id === userId);
+    if (userIndex === -1) return false;
+    this.data.users.splice(userIndex, 1);
+    this.save();
+    return true;
   }
 }
 

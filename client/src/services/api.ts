@@ -8,12 +8,27 @@ import {
   IncidentReport,
   MaintenanceLog,
   DashboardStats,
-  CampusPOI
+  CampusPOI,
+  User,
+  LoginPayload,
+  RegisterPayload,
+  AuthResponse,
+  Permission,
+  RoleName
 } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 10000
+});
+
+// Automatically attach JWT token from localStorage if present
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token');
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 export const ApiService = {
@@ -82,6 +97,15 @@ export const ApiService = {
     return res.data.data;
   },
 
+  updateDevice: async (id: number, payload: Partial<Device>): Promise<Device> => {
+    const res = await api.patch<{ success: boolean; data: Device }>(`/devices/${id}`, payload);
+    return res.data.data;
+  },
+
+  deleteDevice: async (id: number): Promise<void> => {
+    await api.delete(`/devices/${id}`);
+  },
+
   // Manuals
   getManuals: async (): Promise<Manual[]> => {
     const res = await api.get<{ success: boolean; data: Manual[] }>('/manuals');
@@ -136,5 +160,65 @@ export const ApiService = {
       params: { text }
     });
     return res.data.qr_data_url;
+  },
+
+  // Auth & RBAC
+  login: async (payload: LoginPayload): Promise<AuthResponse> => {
+    const res = await api.post<{ success: boolean; message: string; data: AuthResponse }>('/auth/login', payload);
+    return res.data.data;
+  },
+
+  register: async (payload: RegisterPayload): Promise<AuthResponse> => {
+    const res = await api.post<{ success: boolean; message: string; data: AuthResponse }>('/auth/register', payload);
+    return res.data.data;
+  },
+
+  getMe: async (): Promise<User> => {
+    const res = await api.get<{ success: boolean; data: User }>('/auth/me');
+    return res.data.data;
+  },
+
+  getUsers: async (): Promise<User[]> => {
+    const res = await api.get<{ success: boolean; data: User[] }>('/auth/users');
+    return res.data.data;
+  },
+
+  createUser: async (payload: {
+    username: string;
+    password: string;
+    full_name: string;
+    email: string;
+    phone?: string;
+    role_name: RoleName;
+  }): Promise<User> => {
+    const res = await api.post<{ success: boolean; message: string; data: User }>('/auth/users', payload);
+    return res.data.data;
+  },
+
+  updateUser: async (userId: number, payload: {
+    full_name: string;
+    email: string;
+    phone?: string;
+    password?: string;
+    role_name: RoleName;
+  }): Promise<User> => {
+    const res = await api.patch<{ success: boolean; message: string; data: User }>(`/auth/users/${userId}`, payload);
+    return res.data.data;
+  },
+
+  deleteUser: async (userId: number): Promise<void> => {
+    await api.delete(`/auth/users/${userId}`);
+  },
+
+  updateUserPermissions: async (
+    userId: number,
+    permissions: Permission[],
+    role_name?: RoleName
+  ): Promise<User> => {
+    const res = await api.patch<{ success: boolean; message: string; data: User }>(
+      `/auth/users/${userId}/permissions`,
+      { permissions, role_name }
+    );
+    return res.data.data;
   }
 };

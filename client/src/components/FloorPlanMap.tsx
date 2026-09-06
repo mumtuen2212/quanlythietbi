@@ -44,6 +44,10 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
   isTechnicianMode = false
 }) => {
   const floorRooms = rooms.filter(r => r.building_id === building.id && r.floor === selectedFloor);
+  const availableFloors = Array.from(
+    new Set(rooms.filter(r => r.building_id === building.id).map(r => r.floor))
+  ).sort((a, b) => a - b);
+  const visibleFloors = availableFloors.length > 0 ? availableFloors : [1];
 
   const indoorPathD = indoorPath && indoorPath.length > 1
     ? indoorPath.reduce((acc, pt, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '')
@@ -65,7 +69,7 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
 
         {/* Floor Buttons */}
         <div className="flex items-center gap-1.5 overflow-x-auto">
-          {Array.from({ length: building.floors }, (_, i) => i + 1).map(fl => {
+          {visibleFloors.map(fl => {
             const isFlSelected = fl === selectedFloor;
             const hasDamage = rooms.some(r => r.building_id === building.id && r.floor === fl && (r.status === 'DAMAGED' || (Boolean(r.pendingReportsCount) && (r.pendingReportsCount ?? 0) > 0)));
             return (

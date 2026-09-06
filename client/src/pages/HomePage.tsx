@@ -14,13 +14,12 @@ import {
   Volume2,
   Wind,
   Navigation,
-  MapPin,
   Compass
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { Building, Room, DashboardStats, CampusPOI } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { CampusMap } from '../components/CampusMap';
+import { LeafletCampusMap } from '../components/LeafletCampusMap';
 import { FloorPlanMap } from '../components/FloorPlanMap';
 import { RoutePlannerModal } from '../components/RoutePlannerModal';
 import { PathfindingService, RouteResult } from '../services/pathfinding';
@@ -36,10 +35,12 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
   const [stats, setStats] = useState<DashboardStats | null>(null);
   
   // Map View States
-  const [viewMode, setViewMode] = useState<'campus' | 'floor'>('campus');
+  const [viewMode, setViewMode] = useState<'leaflet' | 'floor'>('leaflet');
   const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(1);
   const [selectedFloor, setSelectedFloor] = useState<number>(3);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
 
   // Navigation & Route Planner
   const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
@@ -89,18 +90,78 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
   const handleApplyRoute = (route: RouteResult) => {
     setActiveRoute(route);
-    if (route?.floorPoints?.length > 0) {
-      const dest = route.floorPoints[0];
-      setSelectedBuildingId(dest.buildingId);
-      setSelectedFloor(dest.floor);
-    }
+    setViewMode('leaflet');
   };
 
   const handleStartNavigateToRoom = (room: Room) => {
     if (!room) return;
     const route = PathfindingService_fallback(room);
     setActiveRoute(route);
-    setViewMode('floor');
+    const gateCoordinates: [number, number] = [10.9822, 106.6742];
+    const buildingCoordinates: Record<number, [number, number]> = {
+      1: [10.9808, 106.6740],
+      2: [10.9814, 106.6750],
+      3: [10.9798, 106.6747]
+    };
+    const destination = buildingCoordinates[room.building_id];
+    setRouteCoordinates(destination ? [gateCoordinates, destination] : []);
+    setSelectedRoom(room);
+    setViewMode('leaflet');
+  };
+
+  const handleNavigateFromCurrentLocation = async (room: Room, location: { latitude: number; longitude: number }) => {
+    const buildingCoordinates: Record<number, [number, number]> = {
+      1: [10.9808, 106.6740],
+      2: [10.9814, 106.6750],
+      3: [10.9798, 106.6747]
+    };
+    const destination = buildingCoordinates[room.building_id];
+    if (!destination) return;
+
+    setUserLocation([location.latitude, location.longitude]);
+    setSelectedRoom(room);
+    setSelectedBuildingId(room.building_id);
+    setViewMode('leaflet');
+
+    const gates = [
+      { id: 'POI-GATE-1', latitude: 10.9822, longitude: 106.6742 },
+      { id: 'POI-GATE-2', latitude: 10.9802, longitude: 106.6762 }
+    ];
+    const nearestGate = gates.reduce((closest, gate) => {
+      const distance = Math.hypot(location.latitude - gate.latitude, location.longitude - gate.longitude);
+      const closestDistance = Math.hypot(location.latitude - closest.latitude, location.longitude - closest.longitude);
+      return distance < closestDistance ? gate : closest;
+    });
+
+    try {
+      const response = await fetch(`https://router.project-osrm.org/route/v1/foot/${location.longitude},${location.latitude};${destination[1]},${destination[0]}?overview=full&geometries=geojson`);
+      if (!response.ok) throw new Error('Routing service unavailable');
+      const data = await response.json();
+      const routeData = data.routes?.[0];
+      if (!routeData) throw new Error('No route found');
+
+      setRouteCoordinates(routeData.geometry.coordinates.map(([longitude, latitude]: [number, number]) => [latitude, longitude]));
+      setActiveRoute({
+        fromName: 'Vị trí hiện tại của bạn',
+        toName: room.room_number,
+        totalDistanceMeters: Math.round(routeData.distance),
+        estimatedMinutes: Math.max(1, Math.ceil(routeData.duration / 60)),
+        steps: [{ instruction: `Đi theo tuyến đường ngắn nhất đến Tòa ${room.building_code || room.building_id}, sau đó lên Tầng ${room.floor} đến ${room.room_number}.`, distanceMeters: Math.round(routeData.distance), icon: 'walk' }],
+        campusPoints: [],
+        floorPoints: []
+      });
+    } catch {
+      const route = PathfindingService.findRoute(nearestGate.id, `ROOM-${room.id}`);
+      setRouteCoordinates([[location.latitude, location.longitude], destination]);
+      setActiveRoute({ ...route, fromName: `Vị trí hiện tại (gần ${nearestGate.id === 'POI-GATE-1' ? 'Cổng 1' : 'Cổng 2'})` });
+    }
+  };
+
+  const handleSelectRoom = (room: Room) => {
+    setSelectedRoom(room);
+    setSelectedBuildingId(room.building_id);
+    setSelectedFloor(room.floor);
+    setViewMode('leaflet');
   };
 
   const PathfindingService_fallback = (room: Room): RouteResult => {
@@ -121,6 +182,19 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
                           (room.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
     return matchesBuilding && matchesSearch;
   });
+  const mapRooms = safeRoomsList.filter(room => {
+    if (!room) return false;
+    const normalizedSearch = (searchTerm || '').toLowerCase();
+    return (room.room_number || '').toLowerCase().includes(normalizedSearch) ||
+      (room.name || '').toLowerCase().includes(normalizedSearch) ||
+      (room.building_code || '').toLowerCase().includes(normalizedSearch);
+  });
+  const groupedMapRooms = mapRooms.reduce<Record<string, Room[]>>((groups, room) => {
+    const groupKey = `${room.building_code || `Tòa ${room.building_id}`}|${room.floor}`;
+    groups[groupKey] = groups[groupKey] || [];
+    groups[groupKey].push(room);
+    return groups;
+  }, {});
 
   return (
     <div className="space-y-8 pb-20 md:pb-12">
@@ -219,24 +293,24 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
       {/* Interactive Map Section */}
       <section className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setViewMode('campus')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all ${
-                viewMode === 'campus'
-                  ? 'bg-slate-900 text-white shadow-md'
+              onClick={() => setViewMode('leaflet')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                viewMode === 'leaflet'
+                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
                   : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              <MapPin className="w-4 h-4 text-sky-400" />
-              <span>Khuôn Viên Toàn Trường (Campus View)</span>
+              <Compass className="w-4 h-4 text-sky-300" />
+              <span>Bản Đồ Leaflet</span>
             </button>
 
             <button
               onClick={() => setViewMode('floor')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                 viewMode === 'floor'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                   : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
               }`}
             >
@@ -251,35 +325,119 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
           </div>
         </div>
 
-        {viewMode === 'campus' ? (
-          <CampusMap
-            buildings={safeBuildingsList}
-            pois={pois || []}
-            rooms={safeRoomsList}
-            selectedBuildingId={selectedBuildingId}
-            onSelectBuilding={handleSelectBuildingFromMap}
-            onSelectRoom={room => {
-              setSelectedRoom(room);
-              setViewMode('floor');
-            }}
-            navigationPath={activeRoute?.campusPoints}
-            isTechnicianMode={isTechnicianMode}
-          />
-        ) : (
-          currentBuilding && (
-            <FloorPlanMap
-              building={currentBuilding}
-              rooms={safeRoomsList}
-              selectedFloor={selectedFloor}
-              onSelectFloor={fl => setSelectedFloor(fl)}
-              selectedRoom={selectedRoom}
-              onSelectRoom={r => setSelectedRoom(r)}
-              indoorPath={activeRoute?.floorPoints?.map(p => ({ x: p.x, y: p.y }))}
-              onStartNavigateToRoom={handleStartNavigateToRoom}
-              isTechnicianMode={isTechnicianMode}
-            />
-          )
-        )}
+        <div className="grid grid-cols-1 xl:grid-cols-[clamp(260px,24vw,320px)_minmax(0,1fr)] gap-3 items-start">
+          <aside className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden flex flex-col h-[min(440px,50vh)] min-h-[300px] sm:h-[min(520px,60vh)] sm:min-h-[380px] xl:h-[min(600px,70vh)] xl:min-h-[420px] xl:sticky xl:top-4">
+            <div className="p-4 border-b border-slate-100 bg-slate-50/80">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div>
+                  <p className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Phòng</p>
+                  <p className="text-sm font-extrabold text-slate-900">Tra cứu trên bản đồ</p>
+                </div>
+                <span className="text-[11px] font-bold text-sky-700 bg-sky-50 px-2 py-1 rounded-full">
+                  {mapRooms.length} phòng
+                </span>
+              </div>
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Tìm phòng, tòa nhà..."
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-3">
+              {mapRooms.length === 0 ? (
+                <p className="p-4 text-center text-xs text-slate-400">Không tìm thấy phòng phù hợp.</p>
+              ) : (
+                Object.entries(groupedMapRooms).map(([groupKey, groupRooms]) => {
+                  const [buildingCode, floor] = groupKey.split('|');
+                  return (
+                    <div key={groupKey} className="space-y-1">
+                      <div className="flex items-center justify-between px-2 pt-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <span>{buildingCode} · Tầng {floor}</span>
+                        <span>{groupRooms.length}</span>
+                      </div>
+                      {groupRooms.map(room => {
+                        const isSelected = selectedRoom?.id === room.id;
+                        return (
+                          <div
+                            key={room.id}
+                            className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${isSelected ? 'bg-sky-50 ring-1 ring-sky-200' : 'hover:bg-slate-50'}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleSelectRoom(room)}
+                              className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                            >
+                              <span className="w-7 h-7 shrink-0 rounded-lg bg-sky-600 text-white flex items-center justify-center text-[10px] font-extrabold">
+                                {room.building_code || 'P'}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block text-xs font-extrabold text-slate-800 truncate">{room.room_number}</span>
+                                <span className="block text-[10px] text-slate-500 truncate">{room.name}</span>
+                              </span>
+                            </button>
+                            <Link
+                              to={`/rooms/${room.id}`}
+                              title={`Xem chi tiết phòng ${room.room_number}`}
+                              className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-white"
+                            >
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </Link>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setSelectedRoom(null); setViewMode('leaflet'); }}
+              className="m-3 py-2.5 rounded-xl bg-sky-50 text-sky-700 text-xs font-extrabold hover:bg-sky-100 transition-colors"
+            >
+              Xem toàn bộ khuôn viên
+            </button>
+          </aside>
+
+          <div className="min-w-0 w-full">
+            {viewMode === 'leaflet' ? (
+              <LeafletCampusMap
+                buildings={safeBuildingsList}
+                pois={pois || []}
+                rooms={safeRoomsList}
+                selectedBuildingId={selectedBuildingId}
+                onSelectBuilding={handleSelectBuildingFromMap}
+                onSelectRoom={handleSelectRoom}
+                onStartNavigateToRoom={handleStartNavigateToRoom}
+                onNavigateFromCurrentLocation={handleNavigateFromCurrentLocation}
+                userLocation={userLocation}
+                routeCoordinates={routeCoordinates}
+                isTechnicianMode={isTechnicianMode}
+              />
+            ) : (
+              currentBuilding && (
+                <FloorPlanMap
+                  building={currentBuilding}
+                  rooms={safeRoomsList}
+                  selectedFloor={selectedFloor}
+                  onSelectFloor={fl => setSelectedFloor(fl)}
+                  selectedRoom={selectedRoom}
+                  onSelectRoom={r => setSelectedRoom(r)}
+                  indoorPath={activeRoute?.floorPoints?.map(p => ({ x: p.x, y: p.y }))}
+                  onStartNavigateToRoom={handleStartNavigateToRoom}
+                  isTechnicianMode={isTechnicianMode}
+                />
+              )
+            )}
+          </div>
+        </div>
       </section>
 
       {/* Stats Overview */}

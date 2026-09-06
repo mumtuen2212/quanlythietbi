@@ -1,16 +1,65 @@
+export type RoleName = 'ADMIN' | 'TECHNICIAN' | 'TEACHER' | 'STUDENT';
+
 export interface Role {
   id: number;
-  role_name: 'ADMIN' | 'TECHNICIAN' | 'TEACHER' | 'STUDENT';
+  role_name: RoleName;
   description: string;
 }
 
+export type Permission = 
+  | 'MANAGE_DEVICES'
+  | 'MANAGE_ROOMS'
+  | 'VIEW_REPORTS'
+  | 'ASSIGN_REPORTS'
+  | 'RESOLVE_REPORTS'
+  | 'GRANT_PERMISSIONS'
+  | 'CREATE_REPORT';
+
+export const ALL_PERMISSIONS: Permission[] = [
+  'MANAGE_DEVICES',
+  'MANAGE_ROOMS',
+  'VIEW_REPORTS',
+  'ASSIGN_REPORTS',
+  'RESOLVE_REPORTS',
+  'GRANT_PERMISSIONS',
+  'CREATE_REPORT'
+];
+
+export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, Permission[]> = {
+  ADMIN: [
+    'MANAGE_DEVICES',
+    'MANAGE_ROOMS',
+    'VIEW_REPORTS',
+    'ASSIGN_REPORTS',
+    'RESOLVE_REPORTS',
+    'GRANT_PERMISSIONS',
+    'CREATE_REPORT'
+  ],
+  TECHNICIAN: [
+    'MANAGE_DEVICES',
+    'VIEW_REPORTS',
+    'RESOLVE_REPORTS',
+    'CREATE_REPORT'
+  ],
+  TEACHER: [
+    'VIEW_REPORTS',
+    'CREATE_REPORT'
+  ],
+  STUDENT: [
+    'CREATE_REPORT'
+  ]
+};
+
 export interface User {
   id: number;
+  username: string;
   role_name: 'ADMIN' | 'TECHNICIAN' | 'TEACHER' | 'STUDENT';
   full_name: string;
   email: string;
   phone: string;
   avatar_url?: string;
+  password_hash?: string;
+  permissions: Permission[];
   created_at: string;
 }
 
