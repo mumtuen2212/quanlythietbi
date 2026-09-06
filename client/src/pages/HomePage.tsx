@@ -9,17 +9,13 @@ import {
   Cpu, 
   Layers,
   ArrowRight,
-  Sparkles,
   Mic,
   Tv,
   Volume2,
   Wind,
   Navigation,
   MapPin,
-  Compass,
-  Eye,
-  ShieldCheck,
-  UserCheck
+  Compass
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { Building, Room, DashboardStats, CampusPOI } from '../types';
@@ -60,17 +56,23 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
     try {
       setLoading(true);
       const [buildingsData, poisData, roomsData, statsData] = await Promise.all([
-        ApiService.getBuildings(),
-        ApiService.getPois(),
-        ApiService.getRooms(),
-        ApiService.getStats()
+        ApiService.getBuildings().catch(() => []),
+        ApiService.getPois().catch(() => []),
+        ApiService.getRooms().catch(() => []),
+        ApiService.getStats().catch(() => null)
       ]);
-      setBuildings(buildingsData);
-      setPois(poisData);
-      setRooms(roomsData);
+
+      const safeBuildings = Array.isArray(buildingsData) ? buildingsData : [];
+      const safePois = Array.isArray(poisData) ? poisData : [];
+      const safeRooms = Array.isArray(roomsData) ? roomsData : [];
+
+      setBuildings(safeBuildings);
+      setPois(safePois);
+      setRooms(safeRooms);
       setStats(statsData);
-      if (buildingsData.length > 0) {
-        setSelectedBuildingId(buildingsData[0].id);
+
+      if (safeBuildings.length > 0) {
+        setSelectedBuildingId(safeBuildings[0].id);
       }
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -87,8 +89,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
   const handleApplyRoute = (route: RouteResult) => {
     setActiveRoute(route);
-    // If route destination is a room, select that building and floor automatically
-    if (route.floorPoints.length > 0) {
+    if (route?.floorPoints?.length > 0) {
       const dest = route.floorPoints[0];
       setSelectedBuildingId(dest.buildingId);
       setSelectedFloor(dest.floor);
@@ -96,6 +97,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
   };
 
   const handleStartNavigateToRoom = (room: Room) => {
+    if (!room) return;
     const route = PathfindingService_fallback(room);
     setActiveRoute(route);
     setViewMode('floor');
@@ -106,18 +108,23 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
     return PathfindingService.findRoute('POI-GATE-1', roomIdStr);
   };
 
-  const currentBuilding = buildings.find(b => b.id === selectedBuildingId) || buildings[0];
+  // SỬA LỖI TẠI ĐÂY: Thêm phòng vệ (buildings || []) và ?.find
+  const safeBuildingsList = buildings || [];
+  const currentBuilding = safeBuildingsList.find(b => b?.id === selectedBuildingId) || safeBuildingsList[0];
 
-  const filteredRooms = rooms.filter(room => {
+  // SỬA LỖI TẠI ĐÂY: Thêm phòng vệ cho rooms.filter
+  const safeRoomsList = rooms || [];
+  const filteredRooms = safeRoomsList.filter(room => {
+    if (!room) return false;
     const matchesBuilding = selectedBuildingId ? room.building_id === selectedBuildingId : true;
-    const matchesSearch = room.room_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          room.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (room.room_number || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
+                          (room.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
     return matchesBuilding && matchesSearch;
   });
 
   return (
     <div className="space-y-8 pb-20 md:pb-12">
-      {/* Top Banner with Navigation Trigger */}
+      {/* Top Banner */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-sky-950 to-indigo-950 text-white p-6 sm:p-10 shadow-xl">
         <div className="relative z-10 max-w-3xl space-y-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -168,12 +175,11 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
           </div>
         </div>
 
-        {/* Decorative background glow */}
         <div className="absolute right-0 top-0 -mt-10 -mr-10 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute right-20 bottom-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-2xl pointer-events-none" />
       </section>
 
-      {/* Active Route Notification Banner (If route is selected) */}
+      {/* Active Route Notification Banner */}
       {activeRoute && (
         <div className="bg-sky-50 border border-sky-200 rounded-3xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
           <div className="flex items-start gap-3">
@@ -189,7 +195,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
               <p className="text-sm font-extrabold text-slate-900">
                 {activeRoute.fromName} <span className="text-sky-600 font-bold">➔</span> {activeRoute.toName}
               </p>
-              <p className="text-xs text-slate-600 font-medium">{activeRoute.steps[0]?.instruction}</p>
+              <p className="text-xs text-slate-600 font-medium">{activeRoute.steps?.[0]?.instruction}</p>
             </div>
           </div>
 
@@ -210,9 +216,8 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
         </div>
       )}
 
-      {/* Interactive Map & Floor Plan Viewer Section */}
+      {/* Interactive Map Section */}
       <section className="space-y-4">
-        {/* Map View Switcher Toolbar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <button
@@ -246,12 +251,11 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
           </div>
         </div>
 
-        {/* Render Map according to selected view mode */}
         {viewMode === 'campus' ? (
           <CampusMap
-            buildings={buildings}
-            pois={pois}
-            rooms={rooms}
+            buildings={safeBuildingsList}
+            pois={pois || []}
+            rooms={safeRoomsList}
             selectedBuildingId={selectedBuildingId}
             onSelectBuilding={handleSelectBuildingFromMap}
             onSelectRoom={room => {
@@ -265,12 +269,12 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
           currentBuilding && (
             <FloorPlanMap
               building={currentBuilding}
-              rooms={rooms}
+              rooms={safeRoomsList}
               selectedFloor={selectedFloor}
               onSelectFloor={fl => setSelectedFloor(fl)}
               selectedRoom={selectedRoom}
               onSelectRoom={r => setSelectedRoom(r)}
-              indoorPath={activeRoute?.floorPoints.map(p => ({ x: p.x, y: p.y }))}
+              indoorPath={activeRoute?.floorPoints?.map(p => ({ x: p.x, y: p.y }))}
               onStartNavigateToRoom={handleStartNavigateToRoom}
               isTechnicianMode={isTechnicianMode}
             />
@@ -287,7 +291,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             </div>
             <div>
               <p className="text-xs text-slate-500 font-medium">Tổng phòng học</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.totalRooms}</p>
+              <p className="text-2xl font-bold text-slate-900">{stats.totalRooms || 0}</p>
             </div>
           </div>
 
@@ -297,7 +301,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             </div>
             <div>
               <p className="text-xs text-slate-500 font-medium">Tổng thiết bị</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.totalDevices}</p>
+              <p className="text-2xl font-bold text-slate-900">{stats.totalDevices || 0}</p>
             </div>
           </div>
 
@@ -308,8 +312,8 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             <div>
               <p className="text-xs text-slate-500 font-medium">Đang hoạt động tốt</p>
               <div className="flex items-baseline gap-1.5">
-                <span className="text-2xl font-bold text-emerald-600">{stats.activeDevices}</span>
-                <span className="text-xs text-emerald-600 font-semibold">({stats.deviceHealthRatio}%)</span>
+                <span className="text-2xl font-bold text-emerald-600">{stats.activeDevices || 0}</span>
+                <span className="text-xs text-emerald-600 font-semibold">({stats.deviceHealthRatio || 0}%)</span>
               </div>
             </div>
           </div>
@@ -320,7 +324,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             </div>
             <div>
               <p className="text-xs text-slate-500 font-medium">Sự cố chờ xử lý</p>
-              <p className="text-2xl font-bold text-rose-600">{stats.pendingReports}</p>
+              <p className="text-2xl font-bold text-rose-600">{stats.pendingReports || 0}</p>
             </div>
           </div>
         </section>
@@ -337,7 +341,6 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             <p className="text-sm text-slate-500">Tra cứu nhanh trang thiết bị của từng phòng học</p>
           </div>
 
-          {/* Search bar */}
           <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -360,10 +363,10 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
                 : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
             }`}
           >
-            Tất cả tòa nhà ({rooms.length})
+            Tất cả tòa nhà ({safeRoomsList.length})
           </button>
 
-          {buildings.map(b => (
+          {safeBuildingsList.map(b => (
             <button
               key={b.id}
               onClick={() => setSelectedBuildingId(b.id)}
@@ -416,7 +419,6 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
                     </p>
                   )}
 
-                  {/* Device equipment preview badges */}
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                     <div className="flex items-center gap-2">
                       <span className="p-1 rounded bg-sky-50 text-sky-600" title="Micro không dây"><Mic className="w-3.5 h-3.5" /></span>
