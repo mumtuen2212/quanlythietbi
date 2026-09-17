@@ -30,6 +30,7 @@ interface FloorPlanMapProps {
   indoorPath?: { x: number; y: number }[];
   onStartNavigateToRoom?: (room: Room) => void;
   isTechnicianMode?: boolean;
+  onMapClick?: (event: React.MouseEvent<SVGSVGElement>) => void;
 }
 
 export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
@@ -41,7 +42,8 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
   onSelectRoom,
   indoorPath,
   onStartNavigateToRoom,
-  isTechnicianMode = false
+  isTechnicianMode = false,
+  onMapClick
 }) => {
   const floorRooms = rooms.filter(r => r.building_id === building.id && r.floor === selectedFloor);
   const availableFloors = Array.from(
@@ -103,7 +105,7 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
           <span>Mặt Bằng Tầng {selectedFloor} - {building.name.split('-')[0].trim()}</span>
         </div>
 
-        <svg viewBox="0 0 900 320" className="w-full h-full p-4">
+        <svg viewBox="0 0 900 320" className="w-full h-full p-4" onClick={onMapClick}>
           <defs>
             <filter id="indoorGlow" x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur stdDeviation="3" result="blur" />

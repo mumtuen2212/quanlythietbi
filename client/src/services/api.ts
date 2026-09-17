@@ -18,7 +18,7 @@ import {
 } from '../types';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 10000
 });
 
@@ -64,6 +64,20 @@ export const ApiService = {
   getRoomByQr: async (qrCode: string): Promise<Room> => {
     const res = await api.get<{ success: boolean; data: Room }>(`/rooms/qr/${qrCode}`);
     return res.data.data;
+  },
+
+  createRoom: async (roomData: any): Promise<Room> => {
+    const res = await api.post<{ success: boolean; data: Room }>('/rooms', roomData);
+    return res.data.data;
+  },
+
+  updateRoom: async (id: number, payload: Partial<Room>): Promise<Room> => {
+    const res = await api.patch<{ success: boolean; data: Room }>(`/rooms/${id}`, payload);
+    return res.data.data;
+  },
+
+  deleteRoom: async (id: number): Promise<void> => {
+    await api.delete(`/rooms/${id}`);
   },
 
   // Categories & Devices

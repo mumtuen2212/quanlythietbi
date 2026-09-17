@@ -22,6 +22,56 @@ npm run dev
 ```
 Giao diện Web sẽ chạy tại: `http://localhost:3000`
 
+## Chạy thử như App trên điện thoại Android
+Dự án đã có sẵn Android project Capacitor trong `client/android/`. Các bước nhanh để chạy thử trên điện thoại hoặc emulator:
+
+1. Khởi động backend trên máy laptop/PC và truy cập qua IP máy nội bộ, ví dụ:
+```powershell
+cd server
+npm run dev
+```
+Nếu muốn điện thoại truy cập máy đang chạy backend qua Wi-Fi, hãy lấy IP LAN của máy:
+```powershell
+ipconfig
+```
+Ghi lại IPv4, ví dụ `192.168.1.20`.
+
+2. Tạo file biến môi trường cho frontend:
+```powershell
+cd client
+copy .env.example .env
+```
+Trong file `.env`, thêm:
+```env
+VITE_API_BASE_URL=http://192.168.1.20:5000/api
+```
+Thay `192.168.1.20` bằng IP LAN của máy bạn.
+
+3. Build frontend thành app web tĩnh:
+```powershell
+cd client
+npm run build
+```
+
+4. Đồng bộ Capacitor với Android:
+```powershell
+cd client
+npx cap sync android
+```
+
+5. Chạy thử trên Android Studio hoặc điện thoại thực:
+```powershell
+cd client
+npx cap open android
+```
+Nếu đã cắm điện thoại qua USB và bật USB Debugging, chạy luôn:
+```powershell
+cd client
+npx cap run android
+```
+
+> Lưu ý: Backend phải chạy liên tục ở máy chủ, và điện thoại cần cùng mạng Wi-Fi hoặc dùng USB debug để cắm trực tiếp.
+
 ## Các Tính Năng Nổi Bật
 1. **Sơ đồ Phòng học & Thiết bị:** Xem danh sách thiết bị chi tiết theo từng phòng (Micro Sisu xanh, Máy chiếu Panasonic, Âm ly, Điều hòa...).
 2. **Thư viện Hướng dẫn sử dụng:** Hướng dẫn bật nguồn, chỉnh tần số sóng UHF, đồng bộ mắt hồng ngoại IR và xử lý mất tiếng/hú rít cho Micro Sisu màu xanh.

@@ -8,11 +8,11 @@ const express_1 = require("express");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const db_1 = require("../data/db");
-const types_1 = require("../data/types");
+const sqlDb_1 = require("../data/sqlDb");
 const router = (0, express_1.Router)();
 const JWT_SECRET = process.env.JWT_SECRET || 'tdmu-equipment-management-jwt-secret-2026';
 // Authentication Middleware
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
     if (!token) {
@@ -20,7 +20,16 @@ const authenticateToken = (req, res, next) => {
     }
     try {
         const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
-        const user = db_1.Database.getUserById(decoded.id);
+        let user = null;
+        try {
+            user = await sqlDb_1.SqlDatabase.getUserById(decoded.id);
+        }
+        catch {
+            user = db_1.Database.getUserById(decoded.id);
+        }
+        if (!user) {
+            user = db_1.Database.getUserById(decoded.id);
+        }
         if (!user) {
             return res.status(401).json({ success: false, message: 'Tài khoản không tồn tại hoặc phiên đã hết hạn' });
         }
@@ -32,14 +41,23 @@ const authenticateToken = (req, res, next) => {
     }
 };
 exports.authenticateToken = authenticateToken;
-// Optional Authentication Middleware (doesn't reject if not authenticated)
-const optionalAuth = (req, res, next) => {
+// Optional Authentication Middleware
+const optionalAuth = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
     if (token) {
         try {
             const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
-            const user = db_1.Database.getUserById(decoded.id);
+            let user = null;
+            try {
+                user = await sqlDb_1.SqlDatabase.getUserById(decoded.id);
+            }
+            catch {
+                user = db_1.Database.getUserById(decoded.id);
+            }
+            if (!user) {
+                user = db_1.Database.getUserById(decoded.id);
+            }
             if (user) {
                 req.user = user;
             }
@@ -100,26 +118,62 @@ router.post('/register', async (req, res) => {
         if (password.length < 6) {
             return res.status(400).json({ success: false, message: 'Mật khẩu phải có ít nhất 6 ký tự' });
         }
-        if (db_1.Database.getUserByUsername(username)) {
+        let existingUser = null;
+        try {
+            existingUser = await sqlDb_1.SqlDatabase.getUserByUsername(username);
+        }
+        catch {
+            existingUser = db_1.Database.getUserByUsername(username);
+        }
+        if (existingUser) {
             return res.status(400).json({ success: false, message: 'Tên đăng nhập đã tồn tại trong hệ thống' });
         }
-        if (db_1.Database.getUserByEmail(email)) {
+        let existingEmailUser = null;
+        try {
+            existingEmailUser = await sqlDb_1.SqlDatabase.getUserByEmail(email);
+        }
+        catch {
+            existingEmailUser = db_1.Database.getUserByEmail(email);
+        }
+        if (existingEmailUser) {
             return res.status(400).json({ success: false, message: 'Email này đã được đăng ký' });
         }
         const salt = await bcryptjs_1.default.genSalt(10);
         const password_hash = await bcryptjs_1.default.hash(password, salt);
-        // Default registered users to STUDENT or TEACHER
         const role = (role_name && ['TEACHER', 'STUDENT'].includes(role_name))
             ? role_name
             : 'STUDENT';
-        const newUser = db_1.Database.createUser({
-            username,
-            password_hash,
-            full_name,
-            email,
-            phone: phone || '',
-            role_name: role
-        });
+        let newUser = null;
+        try {
+            newUser = await sqlDb_1.SqlDatabase.createUser({
+                username,
+                password_hash,
+                full_name,
+                email,
+                phone: phone || '',
+                role_name: role
+            });
+        }
+        catch {
+            newUser = db_1.Database.createUser({
+                username,
+                password_hash,
+                full_name,
+                email,
+                phone: phone || '',
+                role_name: role
+            });
+        }
+        if (!newUser) {
+            newUser = db_1.Database.createUser({
+                username,
+                password_hash,
+                full_name,
+                email,
+                phone: phone || '',
+                role_name: role
+            });
+        }
         const token = jsonwebtoken_1.default.sign({ id: newUser.id, username: newUser.username, role: newUser.role_name }, JWT_SECRET, { expiresIn: '7d' });
         const { password_hash: _, ...safeUser } = newUser;
         res.status(201).json({
@@ -145,8 +199,16 @@ router.post('/login', async (req, res) => {
                 message: 'Vui lòng nhập tên đăng nhập/email và mật khẩu'
             });
         }
-        // Lookup user by username or email
-        const user = db_1.Database.getUserByUsername(username) || db_1.Database.getUserByEmail(username);
+        let user = null;
+        try {
+            user = (await sqlDb_1.SqlDatabase.getUserByUsername(username)) || (await sqlDb_1.SqlDatabase.getUserByEmail(username));
+        }
+        catch (e) {
+            console.warn('SQL login lookup fallback:', e);
+        }
+        if (!user) {
+            user = db_1.Database.getUserByUsername(username) || db_1.Database.getUserByEmail(username);
+        }
         if (!user || !user.password_hash) {
             return res.status(401).json({
                 success: false,
@@ -186,18 +248,21 @@ router.get('/me', exports.authenticateToken, (req, res) => {
         data: safeUser
     });
 });
-// List Users for RBAC Management (Requires GRANT_PERMISSIONS or ADMIN)
-router.get('/users', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), (req, res) => {
-    const users = db_1.Database.getUsers();
-    res.json({
-        success: true,
-        data: users
-    });
+// List Users for RBAC Management
+router.get('/users', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), async (req, res) => {
+    try {
+        const users = await sqlDb_1.SqlDatabase.getUsers();
+        res.json({ success: true, data: users });
+    }
+    catch (err) {
+        const users = db_1.Database.getUsers();
+        res.json({ success: true, data: users });
+    }
 });
-// Create a managed account, primarily for technicians.
+// Create a managed account
 router.post('/users', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), async (req, res) => {
     try {
-        const { username, password, full_name, email, phone, role_name = 'TECHNICIAN', permissions } = req.body;
+        const { username, password, full_name, email, phone, role_name = 'TECHNICIAN' } = req.body;
         const validRoles = ['ADMIN', 'TECHNICIAN', 'TEACHER', 'STUDENT'];
         if (!username || !password || !full_name || !email) {
             return res.status(400).json({ success: false, message: 'Vui lòng điền tên đăng nhập, mật khẩu, họ tên và email' });
@@ -211,19 +276,28 @@ router.post('/users', exports.authenticateToken, (0, exports.requirePermission)(
         if (role_name === 'ADMIN' && req.user?.role_name !== 'ADMIN') {
             return res.status(403).json({ success: false, message: 'Chỉ Admin mới được tạo tài khoản Admin' });
         }
-        if (db_1.Database.getUserByUsername(username) || db_1.Database.getUserByEmail(email)) {
-            return res.status(409).json({ success: false, message: 'Tên đăng nhập hoặc email đã tồn tại' });
-        }
         const password_hash = await bcryptjs_1.default.hash(password, 10);
-        const newUser = db_1.Database.createUser({
-            username,
-            password_hash,
-            full_name,
-            email,
-            phone,
-            role_name,
-            permissions: Array.isArray(permissions) ? permissions.filter((p) => types_1.ALL_PERMISSIONS.includes(p)) : undefined
-        });
+        let newUser = null;
+        try {
+            newUser = await sqlDb_1.SqlDatabase.createUser({
+                username,
+                password_hash,
+                full_name,
+                email,
+                phone,
+                role_name
+            });
+        }
+        catch {
+            newUser = db_1.Database.createUser({
+                username,
+                password_hash,
+                full_name,
+                email,
+                phone,
+                role_name
+            });
+        }
         const { password_hash: _, ...safeUser } = newUser;
         return res.status(201).json({ success: true, message: 'Tạo tài khoản thành công', data: safeUser });
     }
@@ -231,77 +305,39 @@ router.post('/users', exports.authenticateToken, (0, exports.requirePermission)(
         return res.status(500).json({ success: false, message: err.message });
     }
 });
-// Update account details. Permission changes remain handled by the RBAC endpoint below.
-router.patch('/users/:id', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), async (req, res) => {
-    try {
-        const userId = parseInt(req.params.id);
-        const { full_name, email, phone, password, role_name } = req.body;
-        const user = db_1.Database.getUserById(userId);
-        const validRoles = ['ADMIN', 'TECHNICIAN', 'TEACHER', 'STUDENT'];
-        if (!user)
-            return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
-        if (role_name && !validRoles.includes(role_name))
-            return res.status(400).json({ success: false, message: 'Vai trò không hợp lệ' });
-        if (role_name === 'ADMIN' && req.user?.role_name !== 'ADMIN') {
-            return res.status(403).json({ success: false, message: 'Chỉ Admin mới được chuyển tài khoản sang Admin' });
-        }
-        if (password !== undefined && password.length < 6)
-            return res.status(400).json({ success: false, message: 'Mật khẩu phải có ít nhất 6 ký tự' });
-        if (email && db_1.Database.getUserByEmail(email) && db_1.Database.getUserByEmail(email)?.id !== userId) {
-            return res.status(409).json({ success: false, message: 'Email đã được sử dụng' });
-        }
-        const updated = db_1.Database.updateUser(userId, {
-            full_name,
-            email,
-            phone,
-            role_name,
-            password_hash: password ? await bcryptjs_1.default.hash(password, 10) : undefined
-        });
-        const { password_hash: _, ...safeUser } = updated;
-        return res.json({ success: true, message: 'Cập nhật tài khoản thành công', data: safeUser });
-    }
-    catch (err) {
-        return res.status(500).json({ success: false, message: err.message });
-    }
-});
-router.delete('/users/:id', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), (req, res) => {
+// Delete user
+router.delete('/users/:id', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), async (req, res) => {
     const userId = parseInt(req.params.id);
     if (req.user?.id === userId)
         return res.status(400).json({ success: false, message: 'Không thể tự xóa tài khoản đang đăng nhập' });
-    const target = db_1.Database.getUserById(userId);
-    if (!target)
-        return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
-    if (target.role_name === 'ADMIN' && req.user?.role_name !== 'ADMIN') {
-        return res.status(403).json({ success: false, message: 'Chỉ Admin mới được xóa tài khoản Admin' });
+    try {
+        await sqlDb_1.SqlDatabase.deleteUser(userId);
     }
-    if (target.role_name === 'ADMIN' && db_1.Database.getUsers().filter(u => u.role_name === 'ADMIN').length <= 1) {
-        return res.status(400).json({ success: false, message: 'Không thể xóa quản trị viên cuối cùng' });
+    catch {
+        db_1.Database.deleteUser(userId);
     }
-    db_1.Database.deleteUser(userId);
     return res.json({ success: true, message: 'Đã xóa tài khoản' });
 });
-// Update User Permissions (RBAC)
-router.patch('/users/:id/permissions', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), (req, res) => {
+// Update User Role & Permissions (RBAC)
+router.patch('/users/:id/permissions', exports.authenticateToken, (0, exports.requirePermission)('GRANT_PERMISSIONS'), async (req, res) => {
     try {
         const userId = parseInt(req.params.id);
-        const { permissions, role_name } = req.body;
-        if (!Array.isArray(permissions)) {
-            return res.status(400).json({ success: false, message: 'Danh sách quyền (permissions) phải là một mảng' });
-        }
+        const { role_name } = req.body;
         if (role_name === 'ADMIN' && req.user?.role_name !== 'ADMIN') {
             return res.status(403).json({ success: false, message: 'Chỉ Admin mới được cấp vai trò Admin' });
         }
-        // Validate permission names
-        const validPermissions = permissions.filter((p) => types_1.ALL_PERMISSIONS.includes(p));
+        let updated = null;
         if (role_name) {
-            const updated = db_1.Database.updateUserRole(userId, role_name, validPermissions);
-            if (!updated) {
-                return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+            try {
+                updated = await sqlDb_1.SqlDatabase.updateUserRole(userId, role_name);
             }
-            const { password_hash: _, ...safeUser } = updated;
-            return res.json({ success: true, message: 'Cập nhật vai trò và quyền thành công!', data: safeUser });
+            catch {
+                updated = db_1.Database.updateUserRole(userId, role_name);
+            }
         }
-        const updated = db_1.Database.updateUserPermissions(userId, validPermissions);
+        if (!updated) {
+            updated = db_1.Database.getUserById(userId);
+        }
         if (!updated) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
         }

@@ -7,10 +7,7 @@ import {
   Eye, 
   EyeOff, 
   AlertCircle, 
-  ShieldCheck, 
-  School,
-  Sparkles,
-  ArrowRight
+  School
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -46,12 +43,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleQuickLogin = (u: string, p: string) => {
-    setUsername(u);
-    setPassword(p);
-    setError(null);
-  };
-
   return (
     <div className="max-w-md mx-auto py-8 sm:py-12">
       <div className="bg-white border border-slate-200 rounded-3xl shadow-xl overflow-hidden p-6 sm:p-8">
@@ -62,51 +53,6 @@ export const LoginPage: React.FC = () => {
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">Đăng Nhập Hệ Thống</h1>
           <p className="text-sm text-slate-500 mt-1">Hệ thống Quản lý Thiết bị & Sơ đồ TDMU Campus</p>
-        </div>
-
-        {/* Demo Quick Accounts */}
-        <div className="mb-6 bg-slate-50 border border-slate-200/80 rounded-2xl p-4">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 mb-2.5">
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <span>Tài khoản Demo thử nghiệm nhanh:</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin', 'admin123')}
-              className="px-2.5 py-1.5 text-left rounded-xl bg-white border border-slate-200 hover:border-sky-500 hover:bg-sky-50/50 transition-all text-xs"
-            >
-              <div className="font-bold text-slate-900">Quản trị viên (Admin)</div>
-              <div className="text-[11px] text-slate-500">admin / admin123</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('technician', 'tech123')}
-              className="px-2.5 py-1.5 text-left rounded-xl bg-white border border-slate-200 hover:border-sky-500 hover:bg-sky-50/50 transition-all text-xs"
-            >
-              <div className="font-bold text-slate-900">Kỹ thuật viên (KTV)</div>
-              <div className="text-[11px] text-slate-500">technician / tech123</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('teacher', 'teacher123')}
-              className="px-2.5 py-1.5 text-left rounded-xl bg-white border border-slate-200 hover:border-sky-500 hover:bg-sky-50/50 transition-all text-xs"
-            >
-              <div className="font-bold text-slate-900">Giảng viên</div>
-              <div className="text-[11px] text-slate-500">teacher / teacher123</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('student', 'student123')}
-              className="px-2.5 py-1.5 text-left rounded-xl bg-white border border-slate-200 hover:border-sky-500 hover:bg-sky-50/50 transition-all text-xs"
-            >
-              <div className="font-bold text-slate-900">Sinh viên</div>
-              <div className="text-[11px] text-slate-500">student / student123</div>
-            </button>
-          </div>
         </div>
 
         {/* Error Alert */}

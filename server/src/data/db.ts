@@ -669,6 +669,64 @@ export class Database {
     return this.data.rooms.find(r => r.qr_code.toLowerCase() === qrCode.toLowerCase()) || null;
   }
 
+  public static addRoom(room: Omit<Room, 'id' | 'devices' | 'pendingReportsCount' | 'building_code'>): Room {
+    const newId = this.data.rooms.length ? Math.max(...this.data.rooms.map(r => r.id)) + 1 : 1;
+    const normalizedCode = String(room.room_number || 'NEW').trim().toUpperCase().replace(/\s+/g, '-');
+    const newRoom: Room = {
+      ...room,
+      id: newId,
+      qr_code: room.qr_code || `QR-ROOM-${normalizedCode}`,
+      status: room.status || 'ACTIVE',
+      description: room.description || '',
+      x: room.x ?? 0,
+      y: room.y ?? 0,
+      width: room.width ?? 180,
+      height: room.height ?? 120,
+      door_x: room.door_x ?? 50,
+      door_y: room.door_y ?? 50
+    };
+    this.data.rooms.push(newRoom);
+    this.save();
+    return newRoom;
+  }
+
+  public static updateRoom(id: number, payload: Partial<Omit<Room, 'id' | 'devices' | 'pendingReportsCount' | 'building_code'>>): Room | null {
+    const room = this.data.rooms.find(r => r.id === id);
+    if (!room) return null;
+
+    const allowedFields = ['building_id', 'room_number', 'name', 'floor', 'qr_code', 'status', 'description', 'x', 'y', 'width', 'height', 'room_type', 'door_x', 'door_y'];
+    allowedFields.forEach(field => {
+      const value = (payload as any)[field];
+      if (value !== undefined) {
+        (room as any)[field] = value;
+      }
+    });
+
+    this.save();
+    return room;
+  }
+
+  public static deleteRoom(id: number): boolean {
+    const roomIndex = this.data.rooms.findIndex(r => r.id === id);
+    if (roomIndex === -1) return false;
+
+    this.data.rooms.splice(roomIndex, 1);
+    this.data.devices = this.data.devices.map(device => {
+      if (device.room_id === id) {
+        return { ...device, room_id: null };
+      }
+      return device;
+    });
+    this.data.incident_reports = this.data.incident_reports.map(report => {
+      if (report.room_id === id) {
+        return { ...report, room_id: id };
+      }
+      return report;
+    });
+    this.save();
+    return true;
+  }
+
   public static getCategories(): DeviceCategory[] {
     return this.data.categories;
   }

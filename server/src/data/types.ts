@@ -131,6 +131,8 @@ export interface Device {
   warranty_expiry: string;
   image_url?: string;
   specifications?: Record<string, string>;
+  location?: string;
+  description?: string;
   room_name?: string;
   category_name?: string;
   manual?: Manual | null;

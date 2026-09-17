@@ -26,15 +26,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleTechnicianMode
 }) => {
   const location = useLocation();
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, hasPermission } = useAuth();
+  const canAccessAdmin = Boolean(user && (user.role_name === 'ADMIN' || hasPermission('MANAGE_ROOMS')));
 
   const navItems = [
     { path: '/', label: 'Bản đồ & Sơ đồ Tầng', icon: MapPin },
     { path: '/qr-scanner', label: 'Quét mã QR', icon: QrCode, highlight: true },
     { path: '/manuals', label: 'Hướng dẫn sử dụng', icon: BookOpen },
-    { path: '/report-incident', label: 'Báo hỏng thiết bị', icon: AlertTriangle },
-    { path: '/admin', label: 'Quản trị & KTV', icon: Settings }
+    { path: '/report-incident', label: 'Báo hỏng thiết bị', icon: AlertTriangle }
   ];
+
+  if (canAccessAdmin) {
+    navItems.push({ path: '/admin', label: 'Quản trị & KTV', icon: Settings });
+  }
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm">

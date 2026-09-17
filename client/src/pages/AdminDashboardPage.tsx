@@ -35,19 +35,25 @@ import {
   RoleName,
   ALL_PERMISSIONS,
   PERMISSION_LABELS,
-  DEFAULT_ROLE_PERMISSIONS
+  DEFAULT_ROLE_PERMISSIONS,
+  Building
 } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
+import { FloorPlanMap } from '../components/FloorPlanMap';
 
 export const AdminDashboardPage: React.FC = () => {
-  const { user: currentUser, hasPermission } = useAuth();
-  const [activeTab, setActiveTab] = useState<'reports' | 'devices' | 'logs' | 'permissions'>('reports');
+  const { user: currentUser, hasPermission, refreshUser } = useAuth();
+  const isAdmin = currentUser?.role_name === 'ADMIN';
+  const canSeeRoomsTab = hasPermission('MANAGE_ROOMS');
+  const canManageRoomCrud = isAdmin;
+  const [activeTab, setActiveTab] = useState<'reports' | 'devices' | 'rooms' | 'logs' | 'permissions'>('reports');
 
   // Data
   const [reports, setReports] = useState<IncidentReport[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [categories, setCategories] = useState<DeviceCategory[]>([]);
   const [logs, setLogs] = useState<MaintenanceLog[]>([]);
   const [usersList, setUsersList] = useState<User[]>([]);
@@ -79,6 +85,26 @@ export const AdminDashboardPage: React.FC = () => {
   });
   const [deviceModal, setDeviceModal] = useState<{ mode: 'create' | 'edit'; device?: Device } | null>(null);
 
+  // Rooms CRUD State
+  const [showRoomModal, setShowRoomModal] = useState(false);
+  const [roomModal, setRoomModal] = useState<{ mode: 'create' | 'edit'; room?: Room } | null>(null);
+  const [roomForm, setRoomForm] = useState({
+    building_id: '1',
+    room_number: '',
+    name: '',
+    floor: '1',
+    qr_code: '',
+    status: 'ACTIVE' as Room['status'],
+    description: '',
+    x: '0',
+    y: '0',
+    width: '180',
+    height: '120',
+    room_type: 'CLASSROOM' as Room['room_type'],
+    door_x: '50',
+    door_y: '50'
+  });
+
   useEffect(() => {
     loadAllData();
   }, []);
@@ -98,16 +124,18 @@ export const AdminDashboardPage: React.FC = () => {
   const loadAllData = async () => {
     try {
       setLoading(true);
-      const [reportsData, devicesData, roomsData, catData, logsData] = await Promise.all([
+      const [reportsData, devicesData, roomsData, buildingsData, catData, logsData] = await Promise.all([
         ApiService.getIncidentReports(),
         ApiService.getDevices(),
         ApiService.getRooms(),
+        ApiService.getBuildings(),
         ApiService.getCategories(),
         ApiService.getMaintenanceLogs()
       ]);
       setReports(reportsData);
       setDevices(devicesData);
       setRooms(roomsData);
+      setBuildings(buildingsData);
       setCategories(catData);
       setLogs(logsData);
       loadUsersData();
@@ -145,6 +173,9 @@ export const AdminDashboardPage: React.FC = () => {
     try {
       setUserMsg(null);
       await ApiService.updateUserPermissions(u.id, u.permissions, u.role_name);
+      if (currentUser && u.id === currentUser.id) {
+        await refreshUser();
+      }
       setUserMsg({ id: u.id, text: 'Đã lưu phân quyền thành công!' });
       setTimeout(() => setUserMsg(null), 3000);
     } catch (err: any) {
@@ -276,6 +307,154 @@ export const AdminDashboardPage: React.FC = () => {
     }
   };
 
+  const openCreateRoom = () => {
+    setRoomForm({
+      building_id: '1',
+      room_number: '',
+      name: '',
+      floor: '1',
+      qr_code: '',
+      status: 'ACTIVE',
+      description: '',
+      x: '40',
+      y: '40',
+      width: '180',
+      height: '120',
+      room_type: 'CLASSROOM',
+      door_x: '50',
+      door_y: '50'
+    });
+    setRoomModal({ mode: 'create' });
+    setShowRoomModal(true);
+  };
+
+  const openEditRoom = (room: Room) => {
+    setRoomForm({
+      building_id: String(room.building_id),
+      room_number: room.room_number,
+      name: room.name,
+      floor: String(room.floor),
+      qr_code: room.qr_code,
+      status: room.status,
+      description: room.description || '',
+      x: String(room.x),
+      y: String(room.y),
+      width: String(room.width),
+      height: String(room.height),
+      room_type: room.room_type,
+      door_x: String(room.door_x),
+      door_y: String(room.door_y)
+    });
+    setRoomModal({ mode: 'edit', room });
+    setShowRoomModal(true);
+  };
+
+  const handleSaveRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (roomModal?.mode === 'edit' && roomModal.room) {
+        const updated = await ApiService.updateRoom(roomModal.room.id, {
+          building_id: Number(roomForm.building_id),
+          room_number: roomForm.room_number,
+          name: roomForm.name,
+          floor: Number(roomForm.floor),
+          qr_code: roomForm.qr_code,
+          status: roomForm.status,
+          description: roomForm.description,
+          x: Number(roomForm.x),
+          y: Number(roomForm.y),
+          width: Number(roomForm.width),
+          height: Number(roomForm.height),
+          room_type: roomForm.room_type,
+          door_x: Number(roomForm.door_x),
+          door_y: Number(roomForm.door_y)
+        });
+        setRooms(prev => prev.map(item => item.id === updated.id ? { ...item, ...updated } : item));
+      } else {
+        const created = await ApiService.createRoom({
+          building_id: Number(roomForm.building_id),
+          room_number: roomForm.room_number,
+          name: roomForm.name,
+          floor: Number(roomForm.floor),
+          qr_code: roomForm.qr_code,
+          status: roomForm.status,
+          description: roomForm.description,
+          x: Number(roomForm.x),
+          y: Number(roomForm.y),
+          width: Number(roomForm.width),
+          height: Number(roomForm.height),
+          room_type: roomForm.room_type,
+          door_x: Number(roomForm.door_x),
+          door_y: Number(roomForm.door_y)
+        });
+        setRooms(prev => [...prev, created]);
+      }
+      setShowRoomModal(false);
+      setRoomModal(null);
+      setRoomForm({
+        building_id: '1',
+        room_number: '',
+        name: '',
+        floor: '1',
+        qr_code: '',
+        status: 'ACTIVE',
+        description: '',
+        x: '0',
+        y: '0',
+        width: '180',
+        height: '120',
+        room_type: 'CLASSROOM',
+        door_x: '50',
+        door_y: '50'
+      });
+    } catch (err: any) {
+      window.alert(err.response?.data?.message || 'Không thể lưu phòng.');
+    }
+  };
+
+  const handleFloorMapPick = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratioX = (event.clientX - rect.left) / rect.width;
+    const ratioY = (event.clientY - rect.top) / rect.height;
+    const x = Math.round(Math.max(0, Math.min(900, ratioX * 900)));
+    const y = Math.round(Math.max(0, Math.min(320, ratioY * 320)));
+
+    setRoomForm(prev => ({
+      ...prev,
+      x: String(x),
+      y: String(y),
+      door_x: String(Math.max(20, Math.round(x + 30))),
+      door_y: String(Math.max(20, Math.round(y + 30)))
+    }));
+  };
+
+  const handleFloorPlanMapPick = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratioX = (event.clientX - rect.left) / rect.width;
+    const ratioY = (event.clientY - rect.top) / rect.height;
+    const x = Math.round(Math.max(0, Math.min(900, ratioX * 900)));
+    const y = Math.round(Math.max(0, Math.min(320, ratioY * 320)));
+
+    setRoomForm(prev => ({
+      ...prev,
+      x: String(x),
+      y: String(y),
+      door_x: String(Math.max(20, Math.round(x + 30))),
+      door_y: String(Math.max(20, Math.round(y + 30)))
+    }));
+  };
+
+  const handleDeleteRoom = async (room: Room) => {
+    if (!window.confirm(`Xóa phòng ${room.room_number} (${room.name})?`)) return;
+    try {
+      await ApiService.deleteRoom(room.id);
+      setRooms(prev => prev.filter(item => item.id !== room.id));
+      setDevices(prev => prev.map(device => device.room_id === room.id ? { ...device, room_id: null } : device));
+    } catch (err: any) {
+      window.alert(err.response?.data?.message || 'Không thể xóa phòng.');
+    }
+  };
+
   return (
     <div className="space-y-8 pb-20 md:pb-12">
       {/* Header */}
@@ -325,6 +504,20 @@ export const AdminDashboardPage: React.FC = () => {
           <Cpu className="w-4 h-4" />
           <span>Danh Sách Thiết Bị ({devices.length})</span>
         </button>
+
+        {canSeeRoomsTab && (
+          <button
+            onClick={() => setActiveTab('rooms')}
+            className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
+              activeTab === 'rooms'
+                ? 'border-sky-600 text-sky-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>Quản Lý Phòng ({rooms.length})</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('logs')}
@@ -467,7 +660,107 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab Content 3: Maintenance Logs */}
+      {/* Tab Content 3: Room Management */}
+      {activeTab === 'rooms' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-sky-600" />
+                <span>Quản lý Phòng & Vị trí</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">Thêm, sửa, xóa phòng và gắn vị trí tầng, toạ độ, loại phòng và thiết bị trong phòng.</p>
+            </div>
+            {canManageRoomCrud && (
+              <button
+                type="button"
+                onClick={openCreateRoom}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Thêm phòng</span>
+              </button>
+            )}
+          </div>
+
+          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600">
+                <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-5 py-4">Phòng</th>
+                    <th className="px-5 py-4">Tên</th>
+                    <th className="px-5 py-4">Tòa</th>
+                    <th className="px-5 py-4">Tầng</th>
+                    <th className="px-5 py-4">Vị trí</th>
+                    <th className="px-5 py-4">Loại</th>
+                    <th className="px-5 py-4">Thiết bị</th>
+                    <th className="px-5 py-4">Trạng thái</th>
+                    {hasPermission('MANAGE_ROOMS') && <th className="px-5 py-4 text-right">Thao tác</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rooms.map(room => {
+                    const roomBuilding = buildings.find(b => b.id === room.building_id);
+                    const roomDevices = devices.filter(d => d.room_id === room.id);
+
+                    return (
+                      <tr key={room.id} className="hover:bg-slate-50/50">
+                        <td className="px-5 py-4 font-mono font-black text-sky-700">{room.room_number}</td>
+                        <td className="px-5 py-4 font-bold text-slate-900">{room.name}</td>
+                        <td className="px-5 py-4 font-semibold text-slate-800">{roomBuilding?.name || room.building_code || 'N/A'}</td>
+                        <td className="px-5 py-4 font-semibold text-slate-800">Tầng {room.floor}</td>
+                        <td className="px-5 py-4">
+                          <span className="font-semibold text-slate-800">x:{room.x}, y:{room.y}</span>
+                          <span className="block text-[11px] text-slate-400">door: {room.door_x},{room.door_y}</span>
+                        </td>
+                        <td className="px-5 py-4 font-bold text-slate-800">{room.room_type}</td>
+                        <td className="px-5 py-4">
+                          {roomDevices.length === 0 ? (
+                            <span className="text-slate-400 text-[11px]">Chưa có thiết bị</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {roomDevices.slice(0, 4).map(dev => (
+                                <span key={dev.id} className="inline-flex px-2 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-bold">
+                                  {dev.name}
+                                </span>
+                              ))}
+                              {roomDevices.length > 4 && (
+                                <span className="inline-flex px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold">
+                                  +{roomDevices.length - 4}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-extrabold border ${
+                            room.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                            room.status === 'MAINTENANCE' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                            'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}>{room.status}</span>
+                        </td>
+                        {canManageRoomCrud && (
+                          <td className="px-5 py-4 text-right whitespace-nowrap">
+                            <button type="button" onClick={() => openEditRoom(room)} title="Sửa phòng" className="inline-flex p-2 rounded-lg text-sky-700 hover:bg-sky-50">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button type="button" onClick={() => handleDeleteRoom(room)} title="Xóa phòng" className="inline-flex p-2 rounded-lg text-rose-600 hover:bg-rose-50">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab Content 4: Maintenance Logs */}
       {activeTab === 'logs' && (
         <div className="space-y-4">
           {logs.map(log => (
@@ -488,7 +781,7 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab Content 4: RBAC & Permissions Management */}
+      {/* Tab Content 5: RBAC & Permissions Management */}
       {activeTab === 'permissions' && (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -805,6 +1098,140 @@ export const AdminDashboardPage: React.FC = () => {
                   }}
                   className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs"
                 >
+                  Hủy
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Room management modal */}
+      {showRoomModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl space-y-5 animate-in fade-in zoom-in">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-extrabold text-slate-900">{roomModal?.mode === 'edit' ? 'Sửa thông tin phòng' : 'Thêm phòng mới'}</h3>
+              <button type="button" onClick={() => { setShowRoomModal(false); setRoomModal(null); }} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" title="Đóng"><X className="w-4 h-4" /></button>
+            </div>
+
+            <form onSubmit={handleSaveRoom} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Mã phòng *</label>
+                  <input value={roomForm.room_number} onChange={e => setRoomForm({ ...roomForm, room_number: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" required />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Tên phòng *</label>
+                  <input value={roomForm.name} onChange={e => setRoomForm({ ...roomForm, name: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" required />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Tòa nhà</label>
+                  <select value={roomForm.building_id} onChange={e => setRoomForm({ ...roomForm, building_id: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                    {buildings.map(b => <option key={b.id} value={b.id}>[{b.building_code}] {b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Tầng</label>
+                  <input type="number" min={1} value={roomForm.floor} onChange={e => setRoomForm({ ...roomForm, floor: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Loại phòng</label>
+                  <select value={roomForm.room_type} onChange={e => setRoomForm({ ...roomForm, room_type: e.target.value as Room['room_type'] })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                    <option value="CLASSROOM">CLASSROOM</option>
+                    <option value="LAB">LAB</option>
+                    <option value="HALL">HALL</option>
+                    <option value="STAIRS">STAIRS</option>
+                    <option value="WC">WC</option>
+                    <option value="ELEVATOR">ELEVATOR</option>
+                    <option value="OFFICE">OFFICE</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Trạng thái</label>
+                  <select value={roomForm.status} onChange={e => setRoomForm({ ...roomForm, status: e.target.value as Room['status'] })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="MAINTENANCE">MAINTENANCE</option>
+                    <option value="CLOSED">CLOSED</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Mã QR phòng</label>
+                <input value={roomForm.qr_code} onChange={e => setRoomForm({ ...roomForm, qr_code: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono" />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Mô tả</label>
+                <textarea value={roomForm.description} onChange={e => setRoomForm({ ...roomForm, description: e.target.value })} rows={2} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+              </div>
+
+              <div className="rounded-2xl border border-sky-100 bg-sky-50/40 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-extrabold text-sky-800">Chọn vị trí trên sơ đồ tầng</span>
+                    <p className="text-[10px] text-slate-500 mt-1">Nhấn vào sơ đồ lớn để lấy x:y và cập nhật tọa độ phòng.</p>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-700">x:{roomForm.x} · y:{roomForm.y}</span>
+                </div>
+
+                {buildings.length > 0 && (
+                  <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200">
+                    <FloorPlanMap
+                      building={buildings.find(b => String(b.id) === roomForm.building_id) || buildings[0]}
+                      rooms={rooms}
+                      selectedFloor={Number(roomForm.floor) || 1}
+                      onSelectFloor={(floor) => setRoomForm({ ...roomForm, floor: String(floor) })}
+                      selectedRoom={null}
+                      onSelectRoom={() => null}
+                      onMapClick={handleFloorMapPick}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="text-xs font-bold text-slate-700">x</label>
+                  <input type="number" value={roomForm.x} onChange={e => setRoomForm({ ...roomForm, x: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">y</label>
+                  <input type="number" value={roomForm.y} onChange={e => setRoomForm({ ...roomForm, y: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">width</label>
+                  <input type="number" value={roomForm.width} onChange={e => setRoomForm({ ...roomForm, width: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">height</label>
+                  <input type="number" value={roomForm.height} onChange={e => setRoomForm({ ...roomForm, height: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700">door_x</label>
+                  <input type="number" value={roomForm.door_x} onChange={e => setRoomForm({ ...roomForm, door_x: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">door_y</label>
+                  <input type="number" value={roomForm.door_y} onChange={e => setRoomForm({ ...roomForm, door_y: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-sky-600 text-white font-bold text-xs hover:bg-sky-700">
+                  {roomModal?.mode === 'edit' ? 'Lưu phòng' : 'Thêm phòng'}
+                </button>
+                <button type="button" onClick={() => { setShowRoomModal(false); setRoomModal(null); }} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">
                   Hủy
                 </button>
               </div>

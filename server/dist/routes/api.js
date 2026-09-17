@@ -8,6 +8,7 @@ const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const qrcode_1 = __importDefault(require("qrcode"));
 const db_1 = require("../data/db");
+const sqlDb_1 = require("../data/sqlDb");
 const auth_1 = require("./auth");
 const router = (0, express_1.Router)();
 // Multer configuration for file uploads
@@ -26,106 +27,323 @@ const upload = (0, multer_1.default)({
     limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 // ================= DASHBOARD & STATS =================
-router.get('/stats', (req, res) => {
-    const stats = db_1.Database.getDashboardStats();
-    res.json({ success: true, data: stats });
+router.get('/stats', async (req, res) => {
+    try {
+        const stats = await sqlDb_1.SqlDatabase.getDashboardStats();
+        res.json({ success: true, data: stats });
+    }
+    catch (err) {
+        const stats = db_1.Database.getDashboardStats();
+        res.json({ success: true, data: stats });
+    }
 });
 // ================= BUILDINGS & ROOMS =================
-router.get('/pois', (req, res) => {
-    const pois = db_1.Database.getPois();
-    res.json({ success: true, data: pois });
+router.get('/pois', async (req, res) => {
+    try {
+        const pois = await sqlDb_1.SqlDatabase.getPois();
+        res.json({ success: true, data: pois });
+    }
+    catch (err) {
+        const pois = db_1.Database.getPois();
+        res.json({ success: true, data: pois });
+    }
 });
-router.get('/buildings', (req, res) => {
-    const buildings = db_1.Database.getBuildings();
-    res.json({ success: true, data: buildings });
+router.get('/buildings', async (req, res) => {
+    try {
+        const buildings = await sqlDb_1.SqlDatabase.getBuildings();
+        res.json({ success: true, data: buildings });
+    }
+    catch (err) {
+        const buildings = db_1.Database.getBuildings();
+        res.json({ success: true, data: buildings });
+    }
 });
-router.get('/rooms', (req, res) => {
-    const buildingId = req.query.building_id ? parseInt(req.query.building_id) : undefined;
-    const floor = req.query.floor ? parseInt(req.query.floor) : undefined;
-    const rooms = db_1.Database.getRooms(buildingId, floor);
-    res.json({ success: true, data: rooms });
+router.get('/rooms', async (req, res) => {
+    try {
+        const buildingId = req.query.building_id ? parseInt(req.query.building_id) : undefined;
+        const floor = req.query.floor ? parseInt(req.query.floor) : undefined;
+        const rooms = await sqlDb_1.SqlDatabase.getRooms(buildingId, floor);
+        res.json({ success: true, data: rooms });
+    }
+    catch (err) {
+        const buildingId = req.query.building_id ? parseInt(req.query.building_id) : undefined;
+        const floor = req.query.floor ? parseInt(req.query.floor) : undefined;
+        const rooms = db_1.Database.getRooms(buildingId, floor);
+        res.json({ success: true, data: rooms });
+    }
 });
-router.get('/rooms/:id', (req, res) => {
+router.get('/rooms/:id', async (req, res) => {
+    try {
+        const roomId = parseInt(req.params.id);
+        const room = await sqlDb_1.SqlDatabase.getRoomById(roomId);
+        if (!room) {
+            return res.status(404).json({ success: false, message: 'Phòng học không tồn tại' });
+        }
+        res.json({ success: true, data: room });
+    }
+    catch (err) {
+        const roomId = parseInt(req.params.id);
+        const room = db_1.Database.getRoomById(roomId);
+        if (!room) {
+            return res.status(404).json({ success: false, message: 'Phòng học không tồn tại' });
+        }
+        res.json({ success: true, data: room });
+    }
+});
+router.get('/rooms/qr/:qrCode', async (req, res) => {
+    try {
+        const room = await sqlDb_1.SqlDatabase.getRoomByQr(req.params.qrCode);
+        if (!room) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy phòng tương ứng với mã QR' });
+        }
+        const detailedRoom = await sqlDb_1.SqlDatabase.getRoomById(room.id);
+        res.json({ success: true, data: detailedRoom });
+    }
+    catch (err) {
+        const room = db_1.Database.getRoomByQr(req.params.qrCode);
+        if (!room) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy phòng tương ứng với mã QR' });
+        }
+        const detailedRoom = db_1.Database.getRoomById(room.id);
+        res.json({ success: true, data: detailedRoom });
+    }
+});
+router.post('/rooms', auth_1.authenticateToken, (0, auth_1.requireRole)(['ADMIN']), async (req, res) => {
+    try {
+        const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y } = req.body;
+        let newRoom;
+        try {
+            newRoom = await sqlDb_1.SqlDatabase.addRoom({
+                building_id: parseInt(building_id),
+                room_number: room_number || '',
+                name: name || room_number || 'Phòng mới',
+                floor: parseInt(floor) || 1,
+                qr_code: qr_code || `QR-ROOM-${String(room_number || 'NEW').toUpperCase()}`,
+                status: status || 'ACTIVE',
+                description: description || '',
+                x: parseFloat(x) || 0,
+                y: parseFloat(y) || 0,
+                width: parseFloat(width) || 180,
+                height: parseFloat(height) || 120,
+                room_type: room_type || 'CLASSROOM',
+                door_x: parseFloat(door_x) || 50,
+                door_y: parseFloat(door_y) || 50
+            });
+        }
+        catch {
+            newRoom = db_1.Database.addRoom({
+                building_id: parseInt(building_id),
+                room_number: room_number || '',
+                name: name || room_number || 'Phòng mới',
+                floor: parseInt(floor) || 1,
+                qr_code: qr_code || `QR-ROOM-${String(room_number || 'NEW').toUpperCase()}`,
+                status: status || 'ACTIVE',
+                description: description || '',
+                x: parseFloat(x) || 0,
+                y: parseFloat(y) || 0,
+                width: parseFloat(width) || 180,
+                height: parseFloat(height) || 120,
+                room_type: room_type || 'CLASSROOM',
+                door_x: parseFloat(door_x) || 50,
+                door_y: parseFloat(door_y) || 50
+            });
+        }
+        return res.json({ success: true, data: newRoom });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+router.patch('/rooms/:id', auth_1.authenticateToken, (0, auth_1.requireRole)(['ADMIN']), async (req, res) => {
+    try {
+        const roomId = parseInt(req.params.id);
+        const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y } = req.body;
+        const allowedStatuses = ['ACTIVE', 'MAINTENANCE', 'CLOSED'];
+        if (status && !allowedStatuses.includes(status)) {
+            return res.status(400).json({ success: false, message: 'Trạng thái phòng không hợp lệ' });
+        }
+        let updated;
+        try {
+            updated = await sqlDb_1.SqlDatabase.updateRoom(roomId, {
+                building_id: building_id === undefined ? undefined : parseInt(building_id),
+                room_number,
+                name,
+                floor: floor === undefined ? undefined : parseInt(floor),
+                qr_code,
+                status,
+                description,
+                x: x === undefined ? undefined : parseFloat(x),
+                y: y === undefined ? undefined : parseFloat(y),
+                width: width === undefined ? undefined : parseFloat(width),
+                height: height === undefined ? undefined : parseFloat(height),
+                room_type,
+                door_x: door_x === undefined ? undefined : parseFloat(door_x),
+                door_y: door_y === undefined ? undefined : parseFloat(door_y)
+            });
+        }
+        catch {
+            updated = db_1.Database.updateRoom(roomId, {
+                building_id: building_id === undefined ? undefined : parseInt(building_id),
+                room_number,
+                name,
+                floor: floor === undefined ? undefined : parseInt(floor),
+                qr_code,
+                status,
+                description,
+                x: x === undefined ? undefined : parseFloat(x),
+                y: y === undefined ? undefined : parseFloat(y),
+                width: width === undefined ? undefined : parseFloat(width),
+                height: height === undefined ? undefined : parseFloat(height),
+                room_type,
+                door_x: door_x === undefined ? undefined : parseFloat(door_x),
+                door_y: door_y === undefined ? undefined : parseFloat(door_y)
+            });
+        }
+        if (!updated)
+            return res.status(404).json({ success: false, message: 'Phòng không tồn tại' });
+        return res.json({ success: true, data: updated });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+router.delete('/rooms/:id', auth_1.authenticateToken, (0, auth_1.requireRole)(['ADMIN']), async (req, res) => {
     const roomId = parseInt(req.params.id);
-    const room = db_1.Database.getRoomById(roomId);
-    if (!room) {
-        return res.status(404).json({ success: false, message: 'Phòng học không tồn tại' });
+    try {
+        await sqlDb_1.SqlDatabase.deleteRoom(roomId);
     }
-    res.json({ success: true, data: room });
-});
-router.get('/rooms/qr/:qrCode', (req, res) => {
-    const room = db_1.Database.getRoomByQr(req.params.qrCode);
-    if (!room) {
-        return res.status(404).json({ success: false, message: 'Không tìm thấy phòng tương ứng với mã QR' });
+    catch {
+        db_1.Database.deleteRoom(roomId);
     }
-    const detailedRoom = db_1.Database.getRoomById(room.id);
-    res.json({ success: true, data: detailedRoom });
+    return res.json({ success: true, message: 'Đã xóa phòng' });
 });
 // ================= CATEGORIES & DEVICES =================
-router.get('/categories', (req, res) => {
-    const categories = db_1.Database.getCategories();
-    res.json({ success: true, data: categories });
-});
-router.get('/devices', (req, res) => {
-    const categoryId = req.query.category_id ? parseInt(req.query.category_id) : undefined;
-    const status = req.query.status;
-    const roomId = req.query.room_id ? parseInt(req.query.room_id) : undefined;
-    let devices = db_1.Database.getDevices(categoryId, status);
-    if (roomId) {
-        devices = devices.filter(d => d.room_id === roomId);
+router.get('/categories', async (req, res) => {
+    try {
+        const categories = await sqlDb_1.SqlDatabase.getCategories();
+        res.json({ success: true, data: categories });
     }
-    res.json({ success: true, data: devices });
+    catch (err) {
+        const categories = db_1.Database.getCategories();
+        res.json({ success: true, data: categories });
+    }
 });
-router.get('/devices/:id', (req, res) => {
+router.get('/devices', async (req, res) => {
+    try {
+        const categoryId = req.query.category_id ? parseInt(req.query.category_id) : undefined;
+        const status = req.query.status;
+        const roomId = req.query.room_id ? parseInt(req.query.room_id) : undefined;
+        let devices = await sqlDb_1.SqlDatabase.getDevices(categoryId, status);
+        if (roomId) {
+            devices = devices.filter(d => d.room_id === roomId);
+        }
+        res.json({ success: true, data: devices });
+    }
+    catch (err) {
+        const categoryId = req.query.category_id ? parseInt(req.query.category_id) : undefined;
+        const status = req.query.status;
+        const roomId = req.query.room_id ? parseInt(req.query.room_id) : undefined;
+        let devices = db_1.Database.getDevices(categoryId, status);
+        if (roomId) {
+            devices = devices.filter(d => d.room_id === roomId);
+        }
+        res.json({ success: true, data: devices });
+    }
+});
+router.get('/devices/:id', async (req, res) => {
     const devId = parseInt(req.params.id);
-    const device = db_1.Database.getDeviceById(devId);
-    if (!device) {
-        return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+    try {
+        const device = await sqlDb_1.SqlDatabase.getDeviceById(devId);
+        if (!device) {
+            return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+        }
+        res.json({ success: true, data: device });
     }
-    res.json({ success: true, data: device });
-});
-router.get('/devices/qr/:qrCode', (req, res) => {
-    const dev = db_1.Database.getDeviceByQr(req.params.qrCode);
-    if (!dev) {
-        return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị tương ứng với mã QR' });
+    catch (err) {
+        const device = db_1.Database.getDeviceById(devId);
+        if (!device) {
+            return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+        }
+        res.json({ success: true, data: device });
     }
-    const detailedDev = db_1.Database.getDeviceById(dev.id);
-    res.json({ success: true, data: detailedDev });
 });
-router.post('/devices', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
+router.get('/devices/qr/:qrCode', async (req, res) => {
+    try {
+        const dev = await sqlDb_1.SqlDatabase.getDeviceByQr(req.params.qrCode);
+        if (!dev) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị tương ứng với mã QR' });
+        }
+        const detailedDev = await sqlDb_1.SqlDatabase.getDeviceById(dev.id);
+        res.json({ success: true, data: detailedDev });
+    }
+    catch (err) {
+        const dev = db_1.Database.getDeviceByQr(req.params.qrCode);
+        if (!dev) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị tương ứng với mã QR' });
+        }
+        const detailedDev = db_1.Database.getDeviceById(dev.id);
+        res.json({ success: true, data: detailedDev });
+    }
+});
+router.post('/devices', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), async (req, res) => {
     try {
         const { room_id, category_id, device_code, name, model, serial_number, is_portable, purchase_date, warranty_expiry, specifications } = req.body;
         const qr_code = `QR-DEV-${device_code.toUpperCase()}`;
-        const newDevice = db_1.Database.addDevice({
-            room_id: room_id ? parseInt(room_id) : null,
-            category_id: parseInt(category_id),
-            device_code,
-            name,
-            model: model || '',
-            serial_number: serial_number || '',
-            status: 'ACTIVE',
-            is_portable: Boolean(is_portable),
-            qr_code,
-            purchase_date: purchase_date || new Date().toISOString().slice(0, 10),
-            warranty_expiry: warranty_expiry || '',
-            specifications: specifications || {}
-        });
+        let newDevice;
+        try {
+            newDevice = await sqlDb_1.SqlDatabase.addDevice({
+                room_id: room_id ? parseInt(room_id) : null,
+                category_id: parseInt(category_id),
+                device_code,
+                name,
+                model: model || '',
+                serial_number: serial_number || '',
+                status: 'ACTIVE',
+                is_portable: Boolean(is_portable),
+                qr_code,
+                purchase_date: purchase_date || new Date().toISOString().slice(0, 10),
+                warranty_expiry: warranty_expiry || '',
+                specifications: specifications || {}
+            });
+        }
+        catch {
+            newDevice = db_1.Database.addDevice({
+                room_id: room_id ? parseInt(room_id) : null,
+                category_id: parseInt(category_id),
+                device_code,
+                name,
+                model: model || '',
+                serial_number: serial_number || '',
+                status: 'ACTIVE',
+                is_portable: Boolean(is_portable),
+                qr_code,
+                purchase_date: purchase_date || new Date().toISOString().slice(0, 10),
+                warranty_expiry: warranty_expiry || '',
+                specifications: specifications || {}
+            });
+        }
         res.json({ success: true, data: newDevice });
     }
     catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-router.patch('/devices/:id/status', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
+router.patch('/devices/:id/status', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), async (req, res) => {
     const devId = parseInt(req.params.id);
     const { status } = req.body;
-    const updated = db_1.Database.updateDeviceStatus(devId, status);
+    let updated;
+    try {
+        updated = await sqlDb_1.SqlDatabase.updateDeviceStatus(devId, status);
+    }
+    catch {
+        updated = db_1.Database.updateDeviceStatus(devId, status);
+    }
     if (!updated) {
         return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
     }
     res.json({ success: true, data: updated });
 });
-router.patch('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
+router.patch('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), async (req, res) => {
     try {
         const devId = parseInt(req.params.id);
         const { room_id, category_id, device_code, name, model, serial_number, status, is_portable, purchase_date, warranty_expiry, specifications } = req.body;
@@ -133,20 +351,39 @@ router.patch('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermiss
         if (status && !allowedStatuses.includes(status)) {
             return res.status(400).json({ success: false, message: 'Trạng thái thiết bị không hợp lệ' });
         }
-        const updated = db_1.Database.updateDevice(devId, {
-            room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
-            category_id: category_id === undefined ? undefined : parseInt(category_id),
-            device_code,
-            name,
-            model,
-            serial_number,
-            status,
-            is_portable,
-            purchase_date,
-            warranty_expiry,
-            specifications,
-            qr_code: device_code ? `QR-DEV-${device_code.toUpperCase()}` : undefined
-        });
+        let updated;
+        try {
+            updated = await sqlDb_1.SqlDatabase.updateDevice(devId, {
+                room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
+                category_id: category_id === undefined ? undefined : parseInt(category_id),
+                device_code,
+                name,
+                model,
+                serial_number,
+                status,
+                is_portable,
+                purchase_date,
+                warranty_expiry,
+                specifications,
+                qr_code: device_code ? `QR-DEV-${device_code.toUpperCase()}` : undefined
+            });
+        }
+        catch {
+            updated = db_1.Database.updateDevice(devId, {
+                room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
+                category_id: category_id === undefined ? undefined : parseInt(category_id),
+                device_code,
+                name,
+                model,
+                serial_number,
+                status,
+                is_portable,
+                purchase_date,
+                warranty_expiry,
+                specifications,
+                qr_code: device_code ? `QR-DEV-${device_code.toUpperCase()}` : undefined
+            });
+        }
         if (!updated)
             return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
         return res.json({ success: true, data: updated });
@@ -155,27 +392,53 @@ router.patch('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermiss
         return res.status(500).json({ success: false, message: error.message });
     }
 });
-router.delete('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), (req, res) => {
-    const deleted = db_1.Database.deleteDevice(parseInt(req.params.id));
-    if (!deleted)
-        return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+router.delete('/devices/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_DEVICES'), async (req, res) => {
+    const devId = parseInt(req.params.id);
+    try {
+        await sqlDb_1.SqlDatabase.deleteDevice(devId);
+    }
+    catch {
+        db_1.Database.deleteDevice(devId);
+    }
     return res.json({ success: true, message: 'Đã xóa thiết bị' });
 });
 // ================= MANUALS & FAQS =================
-router.get('/manuals', (req, res) => {
-    const manuals = db_1.Database.getManuals();
-    res.json({ success: true, data: manuals });
-});
-router.get('/manuals/:id', (req, res) => {
-    const manualId = parseInt(req.params.id);
-    const manual = db_1.Database.getManualById(manualId);
-    if (!manual) {
-        return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu hướng dẫn' });
+router.get('/manuals', async (req, res) => {
+    try {
+        const manuals = await sqlDb_1.SqlDatabase.getManuals();
+        res.json({ success: true, data: manuals });
     }
-    res.json({ success: true, data: manual });
+    catch {
+        const manuals = db_1.Database.getManuals();
+        res.json({ success: true, data: manuals });
+    }
 });
-router.get('/manuals/device/:deviceId', (req, res) => {
+router.get('/manuals/:id', async (req, res) => {
+    const manualId = parseInt(req.params.id);
+    try {
+        const manual = await sqlDb_1.SqlDatabase.getManualById(manualId);
+        if (!manual) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu hướng dẫn' });
+        }
+        res.json({ success: true, data: manual });
+    }
+    catch {
+        const manual = db_1.Database.getManualById(manualId);
+        if (!manual) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu hướng dẫn' });
+        }
+        res.json({ success: true, data: manual });
+    }
+});
+router.get('/manuals/device/:deviceId', async (req, res) => {
     const devId = parseInt(req.params.deviceId);
+    try {
+        const manual = await sqlDb_1.SqlDatabase.getManualByDeviceId(devId);
+        if (manual) {
+            return res.json({ success: true, data: manual });
+        }
+    }
+    catch { }
     const device = db_1.Database.getDeviceById(devId);
     if (!device) {
         return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
@@ -187,13 +450,19 @@ router.get('/manuals/device/:deviceId', (req, res) => {
     res.json({ success: true, data: manual });
 });
 // ================= INCIDENT REPORTS (BÁO HỎNG) =================
-router.get('/incident-reports', (req, res) => {
+router.get('/incident-reports', async (req, res) => {
     const status = req.query.status;
     const roomId = req.query.room_id ? parseInt(req.query.room_id) : undefined;
-    const reports = db_1.Database.getIncidentReports(status, roomId);
-    res.json({ success: true, data: reports });
+    try {
+        const reports = await sqlDb_1.SqlDatabase.getIncidentReports(status, roomId);
+        res.json({ success: true, data: reports });
+    }
+    catch {
+        const reports = db_1.Database.getIncidentReports(status, roomId);
+        res.json({ success: true, data: reports });
+    }
 });
-router.post('/incident-reports', auth_1.optionalAuth, upload.array('images', 5), (req, res) => {
+router.post('/incident-reports', auth_1.optionalAuth, upload.array('images', 5), async (req, res) => {
     try {
         const { room_id, device_id, title, description, priority } = req.body;
         let { reporter_name, reporter_phone, reporter_role } = req.body;
@@ -207,17 +476,34 @@ router.post('/incident-reports', auth_1.optionalAuth, upload.array('images', 5),
         }
         const files = req.files;
         const image_urls = files ? files.map(f => `/uploads/${f.filename}`) : [];
-        const newReport = db_1.Database.createIncidentReport({
-            room_id: parseInt(room_id),
-            device_id: device_id ? parseInt(device_id) : null,
-            reporter_name,
-            reporter_phone: reporter_phone || '',
-            reporter_role: reporter_role || 'Giảng viên',
-            title,
-            description,
-            image_urls,
-            priority: priority || 'MEDIUM'
-        });
+        let newReport;
+        try {
+            newReport = await sqlDb_1.SqlDatabase.createIncidentReport({
+                room_id: parseInt(room_id),
+                device_id: device_id ? parseInt(device_id) : null,
+                reporter_name,
+                reporter_phone: reporter_phone || '',
+                reporter_role: reporter_role || 'Giảng viên',
+                title,
+                description,
+                image_urls,
+                priority: priority || 'MEDIUM',
+                reporter_id: req.user?.id || 1
+            });
+        }
+        catch {
+            newReport = db_1.Database.createIncidentReport({
+                room_id: parseInt(room_id),
+                device_id: device_id ? parseInt(device_id) : null,
+                reporter_name,
+                reporter_phone: reporter_phone || '',
+                reporter_role: reporter_role || 'Giảng viên',
+                title,
+                description,
+                image_urls,
+                priority: priority || 'MEDIUM'
+            });
+        }
         res.json({
             success: true,
             message: 'Gửi báo cáo sự cố thành công! Bộ phận kỹ thuật đã ghi nhận thông tin.',
@@ -228,48 +514,62 @@ router.post('/incident-reports', auth_1.optionalAuth, upload.array('images', 5),
         res.status(500).json({ success: false, message: error.message });
     }
 });
-router.patch('/incident-reports/:id/status', auth_1.authenticateToken, (0, auth_1.requirePermission)('RESOLVE_REPORTS'), (req, res) => {
+router.patch('/incident-reports/:id/status', auth_1.authenticateToken, (0, auth_1.requirePermission)('RESOLVE_REPORTS'), async (req, res) => {
     const reportId = parseInt(req.params.id);
     const { status, technician_name, solution_note } = req.body;
     const tech = technician_name || (req.user ? req.user.full_name : undefined);
-    const updated = db_1.Database.updateIncidentStatus(reportId, status, tech, solution_note);
+    let updated;
+    try {
+        updated = await sqlDb_1.SqlDatabase.updateIncidentStatus(reportId, status, req.user?.id, tech, solution_note);
+    }
+    catch {
+        updated = db_1.Database.updateIncidentStatus(reportId, status, tech, solution_note);
+    }
     if (!updated) {
         return res.status(404).json({ success: false, message: 'Phiếu báo hỏng không tồn tại' });
-    }
-    // If resolved and note given, automatically log maintenance
-    if (status === 'RESOLVED' && updated.device_id) {
-        db_1.Database.addMaintenanceLog({
-            report_id: reportId,
-            device_id: updated.device_id,
-            technician_name: tech || 'Kỹ thuật viên CSVC',
-            action_taken: solution_note || 'Đã sửa chữa và kiểm tra hoạt động ổn định',
-            parts_replaced: '',
-            cost: 0,
-            note: 'Xử lý hoàn tất từ phiếu báo hỏng ' + updated.report_code
-        });
     }
     res.json({ success: true, message: 'Cập nhật trạng thái thành công', data: updated });
 });
 // ================= MAINTENANCE LOGS =================
-router.get('/maintenance-logs', (req, res) => {
-    const logs = db_1.Database.getMaintenanceLogs();
-    res.json({ success: true, data: logs });
+router.get('/maintenance-logs', async (req, res) => {
+    try {
+        const logs = await sqlDb_1.SqlDatabase.getMaintenanceLogs();
+        res.json({ success: true, data: logs });
+    }
+    catch {
+        const logs = db_1.Database.getMaintenanceLogs();
+        res.json({ success: true, data: logs });
+    }
 });
-router.post('/maintenance-logs', auth_1.authenticateToken, (0, auth_1.requirePermission)('RESOLVE_REPORTS'), (req, res) => {
+router.post('/maintenance-logs', auth_1.authenticateToken, (0, auth_1.requirePermission)('RESOLVE_REPORTS'), async (req, res) => {
     const { report_id, device_id, technician_name, action_taken, parts_replaced, cost, note } = req.body;
     const tech = technician_name || (req.user ? req.user.full_name : '');
     if (!device_id || !tech || !action_taken) {
         return res.status(400).json({ success: false, message: 'Thiếu thông tin bảo trì bắt buộc' });
     }
-    const log = db_1.Database.addMaintenanceLog({
-        report_id: report_id ? parseInt(report_id) : null,
-        device_id: parseInt(device_id),
-        technician_name: tech,
-        action_taken,
-        parts_replaced: parts_replaced || '',
-        cost: cost ? parseFloat(cost) : 0,
-        note
-    });
+    let log;
+    try {
+        log = await sqlDb_1.SqlDatabase.addMaintenanceLog({
+            report_id: report_id ? parseInt(report_id) : null,
+            device_id: parseInt(device_id),
+            technician_name: tech,
+            technician_id: req.user?.id,
+            action_taken,
+            parts_replaced: parts_replaced || '',
+            cost: cost ? parseFloat(cost) : 0
+        });
+    }
+    catch {
+        log = db_1.Database.addMaintenanceLog({
+            report_id: report_id ? parseInt(report_id) : null,
+            device_id: parseInt(device_id),
+            technician_name: tech,
+            action_taken,
+            parts_replaced: parts_replaced || '',
+            cost: cost ? parseFloat(cost) : 0,
+            note
+        });
+    }
     res.json({ success: true, data: log });
 });
 // ================= QR CODE GENERATOR =================

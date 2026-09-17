@@ -3,6 +3,7 @@ import React from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { HomePage } from './pages/HomePage';
 import { RoomDetailPage } from './pages/RoomDetailPage';
 import { DeviceDetailPage } from './pages/DeviceDetailPage';
@@ -41,7 +42,14 @@ export const App: React.FC = () => {
               <Route path="/qr-scanner" element={<QRScannerPage />} />
               <Route path="/report-incident" element={<ReportIncidentPage />} />
               <Route path="/manuals" element={<ManualsListPage />} />
-              <Route path="/admin" element={<AdminDashboardPage />} />
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute requiredPermission="MANAGE_ROOMS">
+                    <AdminDashboardPage />
+                  </ProtectedRoute>
+                }
+              />
             </Routes>
           </main>
         </div>
