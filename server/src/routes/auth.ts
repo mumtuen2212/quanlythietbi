@@ -7,6 +7,7 @@ import { User, Permission, RoleName, ALL_PERMISSIONS } from '../data/types';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'tdmu-equipment-management-jwt-secret-2026';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Extend Express Request to include user
 export interface AuthRequest extends Request {
@@ -268,6 +269,102 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/change-password', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { current_password, new_password, confirm_password } = req.body;
+  if (!current_password || !new_password || !confirm_password) return res.status(400).json({ success: false, message: 'Vui lòng nhập đủ thông tin mật khẩu' });
+  if (new_password.length < 6) return res.status(400).json({ success: false, message: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
+  if (new_password !== confirm_password) return res.status(400).json({ success: false, message: 'Hai lần nhập mật khẩu mới không trùng nhau' });
+  try {
+    const user = await SqlDatabase.getUserById(req.user!.id);
+    if (!user?.password_hash || !await bcrypt.compare(current_password, user.password_hash)) return res.status(400).json({ success: false, message: 'Mật khẩu hiện tại không đúng' });
+    const changed = await SqlDatabase.updateOwnPassword(user.id, await bcrypt.hash(new_password, 12));
+    if (!changed) return res.status(500).json({ success: false, message: 'Không thể đổi mật khẩu' });
+    return res.json({ success: true, message: 'Đổi mật khẩu thành công' });
+  } catch (error: any) { return res.status(500).json({ success: false, message: error.message || 'Không thể đổi mật khẩu' }); }
+});
+
+// Google Identity Services returns an ID token to the browser. The token is
+// verified with Google's token endpoint before this API creates its own JWT.
+router.post('/google', async (req: Request, res: Response) => {
+  try {
+    const { credential } = req.body;
+    if (!GOOGLE_CLIENT_ID) {
+      return res.status(503).json({ success: false, message: 'Đăng nhập Google chưa được cấu hình trên máy chủ' });
+    }
+    if (typeof credential !== 'string' || !credential.trim()) {
+      return res.status(400).json({ success: false, message: 'Thiếu mã xác thực Google' });
+    }
+
+    const googleResponse = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+    );
+    if (!googleResponse.ok) {
+      return res.status(401).json({ success: false, message: 'Mã xác thực Google không hợp lệ hoặc đã hết hạn' });
+    }
+
+    const claims = await googleResponse.json() as {
+      aud?: string;
+      email?: string;
+      email_verified?: string | boolean;
+      exp?: string;
+      iss?: string;
+      name?: string;
+      sub?: string;
+    };
+    const isVerifiedEmail = claims.email_verified === true || claims.email_verified === 'true';
+    const isGoogleIssuer = claims.iss === 'accounts.google.com' || claims.iss === 'https://accounts.google.com';
+    const isExpired = !claims.exp || Number(claims.exp) * 1000 <= Date.now();
+
+    if (
+      claims.aud !== GOOGLE_CLIENT_ID || !claims.email || !claims.sub ||
+      !isVerifiedEmail || !isGoogleIssuer || isExpired
+    ) {
+      return res.status(401).json({ success: false, message: 'Thông tin xác thực Google không hợp lệ' });
+    }
+
+    let user: User | null = null;
+    try {
+      user = await SqlDatabase.getUserByEmail(claims.email);
+    } catch (error) {
+      console.warn('SQL Google login lookup fallback:', error);
+    }
+    if (!user) user = Database.getUserByEmail(claims.email);
+
+    if (!user) {
+      const payload = {
+        username: `google_${claims.sub}`,
+        password_hash: await bcrypt.hash(`google:${claims.sub}:${Date.now()}`, 12),
+        full_name: (claims.name || claims.email.split('@')[0]).slice(0, 150),
+        email: claims.email,
+        phone: '',
+        role_name: 'STUDENT' as RoleName
+      };
+      try {
+        user = await SqlDatabase.createUser(payload);
+      } catch (error) {
+        console.warn('SQL Google user creation fallback:', error);
+      }
+      if (!user) user = Database.createUser(payload);
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role_name },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    const { password_hash: _, ...safeUser } = user;
+
+    return res.json({
+      success: true,
+      message: 'Đăng nhập Google thành công!',
+      data: { token, user: safeUser }
+    });
+  } catch (err: any) {
+    console.error('Google login failed:', err);
+    return res.status(500).json({ success: false, message: 'Không thể xác thực đăng nhập Google' });
+  }
+});
+
 // Current User Profile & Permissions
 router.get('/me', authenticateToken, (req: AuthRequest, res: Response) => {
   if (!req.user) {
@@ -343,14 +440,19 @@ router.post('/users', authenticateToken, requirePermission('GRANT_PERMISSIONS'),
 // Delete user
 router.delete('/users/:id', authenticateToken, requirePermission('GRANT_PERMISSIONS'), async (req: AuthRequest, res: Response) => {
   const userId = parseInt(req.params.id);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ success: false, message: 'Mã tài khoản không hợp lệ' });
+  }
   if (req.user?.id === userId) return res.status(400).json({ success: false, message: 'Không thể tự xóa tài khoản đang đăng nhập' });
 
   try {
-    await SqlDatabase.deleteUser(userId);
-  } catch {
-    Database.deleteUser(userId);
+    const deleted = await SqlDatabase.deleteUser(userId);
+    if (!deleted) return res.status(404).json({ success: false, message: 'Tài khoản không tồn tại hoặc là tài khoản hệ thống' });
+    return res.json({ success: true, message: 'Đã xóa tài khoản' });
+  } catch (error: any) {
+    console.error(`[DELETE /auth/users/${userId}] Xóa trong SQL Server thất bại:`, error);
+    return res.status(500).json({ success: false, message: 'Không thể xóa tài khoản trong cơ sở dữ liệu chính' });
   }
-  return res.json({ success: true, message: 'Đã xóa tài khoản' });
 });
 
 // Update User Role & Permissions (RBAC)

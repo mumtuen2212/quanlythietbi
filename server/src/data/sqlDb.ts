@@ -1,5 +1,6 @@
 import sql from 'mssql';
 import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
 import {
   Building,
   Room,
@@ -25,30 +26,94 @@ const config: sql.config = {
   options: {
     encrypt: false,
     trustServerCertificate: true,
-    enableArithAbort: true
+    enableArithAbort: true,
+    // Tắt tính năng keepalive thủ công, để pool tự quản lý
+    connectTimeout: 30000,
   },
+  connectionTimeout: 30000,
+  requestTimeout: 30000,
   pool: {
-    max: 15,
-    min: 0,
-    idleTimeoutMillis: 30000
+    max: 10,
+    min: 0,          // Cho phép pool về 0 khi nhàn rỗi, tránh idle connection bị server kill
+    idleTimeoutMillis: 10000,  // Đóng connection idle sau 10s (ngắn hơn SQL Server timeout)
+    acquireTimeoutMillis: 30000
   }
 };
 
 let poolPromise: Promise<sql.ConnectionPool> | null = null;
+let activePool: sql.ConnectionPool | null = null;
+let resetPromise: Promise<void> | null = null;
+// The local SQL Server occasionally drops a pooled connection when several
+// browser requests arrive simultaneously. Serialize lightweight app queries so
+// a refresh cannot race a pool reset and return partial data.
+let queryTail: Promise<void> = Promise.resolve();
+
+async function runSqlQuerySerially<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = queryTail;
+  let releaseCurrent!: () => void;
+  queryTail = new Promise<void>(resolve => {
+    releaseCurrent = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    releaseCurrent();
+  }
+}
 
 export class SqlDatabase {
   static async connect(): Promise<sql.ConnectionPool> {
     if (!poolPromise) {
-      poolPromise = sql.connect(config).catch(err => {
-        poolPromise = null;
-        console.error('SQL connect error:', err);
-        throw err;
-      });
+      const pool = new sql.ConnectionPool(config);
+      poolPromise = pool.connect()
+        .then(pool => {
+          activePool = pool;
+          pool.on('error', err => {
+            // One reset is enough for a failed pool. Ignoring follow-up error
+            // events prevents the reconnect log storm seen after ECONNRESET.
+            if (activePool !== pool) return;
+            console.warn('SQL connection was lost; reconnecting on the next request:', err.message);
+            void SqlDatabase.resetPool(pool);
+          });
+          console.log('✅ SQL Server connected successfully');
+          return pool;
+        })
+        .catch(err => {
+          poolPromise = null;
+          console.error('❌ SQL connect error:', err.message);
+          throw err;
+        });
     }
     return poolPromise;
   }
 
-  static async query<T = any>(text: string, params: Record<string, any> = {}): Promise<T[]> {
+  private static async resetPool(pool?: sql.ConnectionPool): Promise<void> {
+    if (pool && activePool !== pool) return;
+    // A page refresh issues several queries at once. They must share one pool
+    // reset, otherwise every failed request closes the replacement pool again.
+    if (resetPromise) return resetPromise;
+    const poolToClose = pool || activePool;
+    activePool = null;
+    poolPromise = null;
+    resetPromise = Promise.resolve(poolToClose?.close())
+      .catch(() => undefined)
+      .then(() => undefined)
+      .finally(() => {
+        resetPromise = null;
+      });
+    return resetPromise;
+  }
+
+  /**
+   * Thực thi SQL query với tự động retry khi gặp ECONNRESET.
+   * Retry tối đa 2 lần trước khi báo lỗi thật sự.
+   */
+  static async query<T = any>(text: string, params: Record<string, any> = {}, retries = 2): Promise<T[]> {
+    return runSqlQuerySerially(() => SqlDatabase.executeQuery<T>(text, params, retries));
+  }
+
+  private static async executeQuery<T = any>(text: string, params: Record<string, any> = {}, retries = 2): Promise<T[]> {
     try {
       const pool = await this.connect();
       const request = pool.request();
@@ -57,8 +122,23 @@ export class SqlDatabase {
       });
       const result = await request.query(text);
       return (result.recordset || []) as T[];
-    } catch (err) {
-      console.error('SQL query error:', err);
+    } catch (err: any) {
+      // Nếu là lỗi kết nối (ECONNRESET, ESOCKET...) thì reset pool và retry
+      const message = String(err?.message || '');
+      const isConnectionError = err?.code === 'ESOCKET' || err?.code === 'ECONNRESET' ||
+        /ECONNRESET|Connection lost|Connection is closing|\baborted\b/i.test(message);
+
+      if (isConnectionError) {
+        console.warn(`⚠️ SQL connection reset, resetting pool... (${retries} retries left)`);
+        await SqlDatabase.resetPool();
+        if (retries > 0) {
+          // Let the single reset finish before all API requests reconnect.
+          await new Promise(resolve => setTimeout(resolve, 250));
+          return SqlDatabase.executeQuery<T>(text, params, retries - 1);
+        }
+      }
+
+      console.error('SQL query error:', err?.message || err);
       throw err;
     }
   }
@@ -117,7 +197,9 @@ export class SqlDatabase {
         LoaiDiem AS category,
         MoTa AS description,
         CAST(X AS float) AS x,
-        CAST(Y AS float) AS y
+        CAST(Y AS float) AS y,
+        CAST(Latitude AS float) AS latitude,
+        CAST(Longitude AS float) AS longitude
       FROM dbo.DiemNoiBat
       ORDER BY DiemNoiBatID
     `);
@@ -139,7 +221,9 @@ export class SqlDatabase {
         SoTang AS floors,
         MauSac AS color,
         CAST(XiengVaoX AS float) AS entrance_x,
-        CAST(XiengVaoY AS float) AS entrance_y
+        CAST(XiengVaoY AS float) AS entrance_y,
+        CAST(Latitude AS float) AS latitude,
+        CAST(Longitude AS float) AS longitude
       FROM dbo.ToaNha
       ORDER BY ToaNhaID
     `);
@@ -160,10 +244,56 @@ export class SqlDatabase {
         SoTang AS floors,
         MauSac AS color,
         CAST(XiengVaoX AS float) AS entrance_x,
-        CAST(XiengVaoY AS float) AS entrance_y
+        CAST(XiengVaoY AS float) AS entrance_y,
+        CAST(Latitude AS float) AS latitude,
+        CAST(Longitude AS float) AS longitude
       FROM dbo.ToaNha
       WHERE ToaNhaID = @id
     `, { id });
+  }
+
+  static async addBuilding(payload: Omit<Building, 'id'>): Promise<Building> {
+    const result = await SqlDatabase.query<any>(`
+      INSERT INTO dbo.ToaNha (
+        MaToaNha, TenToaNha, MoTa, X, Y, ChieuRong, ChieuCao,
+        SoTang, MauSac, XiengVaoX, XiengVaoY, Latitude, Longitude, NgayTao
+      )
+      OUTPUT INSERTED.ToaNhaID AS id
+      VALUES (
+        @building_code, @name, @description, @x, @y, @width, @height,
+        @floors, @color, @entrance_x, @entrance_y, @latitude, @longitude, GETDATE()
+      )
+    `, payload);
+
+    return (await SqlDatabase.getBuildingById(result[0].id)) as Building;
+  }
+
+  static async updateBuilding(id: number, payload: Partial<Building>): Promise<Building | null> {
+    await SqlDatabase.query(`
+      UPDATE dbo.ToaNha SET
+        MaToaNha = COALESCE(@building_code, MaToaNha), TenToaNha = COALESCE(@name, TenToaNha),
+        MoTa = COALESCE(@description, MoTa), SoTang = COALESCE(@floors, SoTang), MauSac = COALESCE(@color, MauSac),
+        Latitude = COALESCE(@latitude, Latitude), Longitude = COALESCE(@longitude, Longitude)
+      WHERE ToaNhaID = @id
+    `, { id, building_code: payload.building_code ?? null, name: payload.name ?? null, description: payload.description ?? null, floors: payload.floors ?? null, color: payload.color ?? null, latitude: payload.latitude ?? null, longitude: payload.longitude ?? null });
+    return SqlDatabase.getBuildingById(id);
+  }
+
+  static async deleteBuilding(id: number): Promise<boolean> {
+    const pool = await SqlDatabase.connect();
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+    try {
+      const result = await new sql.Request(transaction).input('id', id).query(`
+        UPDATE dbo.ThietBi SET PhongHocID = NULL WHERE PhongHocID IN (SELECT PhongHocID FROM dbo.PhongHoc WHERE ToaNhaID = @id);
+        UPDATE dbo.BaoHong SET PhongHocID = NULL WHERE PhongHocID IN (SELECT PhongHocID FROM dbo.PhongHoc WHERE ToaNhaID = @id);
+        DELETE FROM dbo.PhongHoc WHERE ToaNhaID = @id;
+        DELETE FROM dbo.ToaNha WHERE ToaNhaID = @id;
+        SELECT @@ROWCOUNT AS deletedCount;
+      `);
+      await transaction.commit();
+      return Number(result.recordset?.[0]?.deletedCount || 0) === 1;
+    } catch (error) { await transaction.rollback().catch(() => undefined); throw error; }
   }
 
   // ================= ROOMS =================
@@ -185,6 +315,8 @@ export class SqlDatabase {
         CAST(p.ChieuCao AS float) AS height,
         CAST(p.CuaX AS float) AS door_x,
         CAST(p.CuaY AS float) AS door_y,
+        CAST(p.Latitude AS float) AS latitude,
+        CAST(p.Longitude AS float) AS longitude,
         t.MaToaNha AS building_code,
         (
           SELECT COUNT(*) 
@@ -229,6 +361,8 @@ export class SqlDatabase {
         CAST(p.ChieuCao AS float) AS height,
         CAST(p.CuaX AS float) AS door_x,
         CAST(p.CuaY AS float) AS door_y,
+        CAST(p.Latitude AS float) AS latitude,
+        CAST(p.Longitude AS float) AS longitude,
         t.MaToaNha AS building_code,
         (
           SELECT COUNT(*) 
@@ -265,6 +399,8 @@ export class SqlDatabase {
         CAST(p.ChieuCao AS float) AS height,
         CAST(p.CuaX AS float) AS door_x,
         CAST(p.CuaY AS float) AS door_y,
+        CAST(p.Latitude AS float) AS latitude,
+        CAST(p.Longitude AS float) AS longitude,
         t.MaToaNha AS building_code
       FROM dbo.PhongHoc p
       LEFT JOIN dbo.ToaNha t ON t.ToaNhaID = p.ToaNhaID
@@ -279,12 +415,12 @@ export class SqlDatabase {
     const res = await SqlDatabase.query<any>(`
       INSERT INTO dbo.PhongHoc (
         ToaNhaID, SoPhong, TenPhong, Tang, MaQR, TrangThai, MoTa, LoaiPhong,
-        X, Y, ChieuRong, ChieuCao, CuaX, CuaY, NgayTao
+        X, Y, ChieuRong, ChieuCao, CuaX, CuaY, Latitude, Longitude, NgayTao
       )
       OUTPUT INSERTED.PhongHocID AS id
       VALUES (
         @building_id, @room_number, @name, @floor, @qr_code, @status, @description, @room_type,
-        @x, @y, @width, @height, @door_x, @door_y, GETDATE()
+        @x, @y, @width, @height, @door_x, @door_y, @latitude, @longitude, GETDATE()
       )
     `, {
       building_id: payload.building_id,
@@ -300,7 +436,9 @@ export class SqlDatabase {
       width: payload.width ?? 180,
       height: payload.height ?? 130,
       door_x: payload.door_x ?? 20,
-      door_y: payload.door_y ?? 70
+      door_y: payload.door_y ?? 70,
+      latitude: payload.latitude ?? null,
+      longitude: payload.longitude ?? null
     });
 
     const newId = res[0]?.id;
@@ -327,7 +465,9 @@ export class SqlDatabase {
         ChieuRong = COALESCE(@width, ChieuRong),
         ChieuCao = COALESCE(@height, ChieuCao),
         CuaX = COALESCE(@door_x, CuaX),
-        CuaY = COALESCE(@door_y, CuaY)
+        CuaY = COALESCE(@door_y, CuaY),
+        Latitude = COALESCE(@latitude, Latitude),
+        Longitude = COALESCE(@longitude, Longitude)
       WHERE PhongHocID = @id
     `, {
       id,
@@ -344,19 +484,40 @@ export class SqlDatabase {
       width: payload.width ?? null,
       height: payload.height ?? null,
       door_x: payload.door_x ?? null,
-      door_y: payload.door_y ?? null
+      door_y: payload.door_y ?? null,
+      latitude: payload.latitude ?? null,
+      longitude: payload.longitude ?? null
     });
 
     return SqlDatabase.getRoomById(id);
   }
 
   static async deleteRoom(id: number): Promise<boolean> {
-    await SqlDatabase.query(`
-      UPDATE dbo.ThietBi SET PhongHocID = NULL WHERE PhongHocID = @id;
-      UPDATE dbo.BaoHong SET PhongHocID = NULL WHERE PhongHocID = @id;
-      DELETE FROM dbo.PhongHoc WHERE PhongHocID = @id;
-    `, { id });
-    return true;
+    // A room is referenced by both equipment and incident reports.  Keep these
+    // updates and the delete in one transaction so a failed delete cannot leave
+    // the database in a partially updated state.
+    const pool = await SqlDatabase.connect();
+    const transaction = new sql.Transaction(pool);
+
+    await transaction.begin();
+    try {
+      const request = new sql.Request(transaction);
+      request.input('id', id);
+      const result = await request.query(`
+        UPDATE dbo.ThietBi SET PhongHocID = NULL WHERE PhongHocID = @id;
+        UPDATE dbo.BaoHong SET PhongHocID = NULL WHERE PhongHocID = @id;
+        DELETE FROM dbo.PhongHoc WHERE PhongHocID = @id;
+        SELECT @@ROWCOUNT AS deletedCount;
+      `);
+
+      await transaction.commit();
+      return Number(result.recordset?.[0]?.deletedCount || 0) === 1;
+    } catch (error) {
+      // A failed SQL statement may already have aborted the transaction.
+      // Rolling back is still safe; ignore the "not begun" case.
+      await transaction.rollback().catch(() => undefined);
+      throw error;
+    }
   }
 
   // ================= CATEGORIES =================
@@ -917,6 +1078,7 @@ export class SqlDatabase {
         CONVERT(varchar(19), u.NgayTao, 120) AS created_at
       FROM dbo.NguoiDung u
       LEFT JOIN dbo.VaiTro v ON v.VaiTroID = u.VaiTroID
+      WHERE u.TenDangNhap <> N'system_deleted_account'
       ORDER BY u.NguoiDungID
     `);
 
@@ -1033,14 +1195,61 @@ export class SqlDatabase {
     return SqlDatabase.getUserById(userId);
   }
 
+  static async updateOwnPassword(userId: number, passwordHash: string): Promise<boolean> {
+    const rows = await SqlDatabase.query<any>(`
+      UPDATE dbo.NguoiDung SET MatKhauHash = @passwordHash, NgayCapNhat = GETDATE()
+      WHERE NguoiDungID = @userId;
+      SELECT @@ROWCOUNT AS changed;
+    `, { userId, passwordHash });
+    return Number(rows[0]?.changed || 0) === 1;
+  }
+
   static async deleteUser(userId: number): Promise<boolean> {
-    await SqlDatabase.query(`
-      UPDATE dbo.BaoHong SET NguoiBaoID = NULL WHERE NguoiBaoID = @userId;
-      UPDATE dbo.BaoHong SET KyThuatVienNhanID = NULL WHERE KyThuatVienNhanID = @userId;
-      UPDATE dbo.LogBaoTri SET KyThuatVienID = NULL WHERE KyThuatVienID = @userId;
-      DELETE FROM dbo.PhanQuyenNguoiDung WHERE NguoiDungID = @userId;
-      DELETE FROM dbo.NguoiDung WHERE NguoiDungID = @userId;
-    `, { userId });
-    return true;
+    const pool = await SqlDatabase.connect();
+    const transaction = new sql.Transaction(pool);
+    const systemPasswordHash = await bcrypt.hash(`system-deleted-account:${Date.now()}`, 12);
+
+    await transaction.begin();
+    try {
+      const request = new sql.Request(transaction);
+      request.input('userId', userId);
+      request.input('systemPasswordHash', systemPasswordHash);
+      const result = await request.query(`
+        DECLARE @systemUserId INT;
+        DECLARE @studentRoleId INT;
+
+        SELECT @systemUserId = NguoiDungID
+        FROM dbo.NguoiDung
+        WHERE TenDangNhap = N'system_deleted_account';
+
+        IF @systemUserId IS NULL
+        BEGIN
+          SELECT @studentRoleId = VaiTroID FROM dbo.VaiTro WHERE MaVaiTro = N'STUDENT';
+          INSERT INTO dbo.NguoiDung (
+            TenDangNhap, MatKhauHash, HoTen, Email, SoDienThoai, VaiTroID, TrangThai, NgayTao, NgayCapNhat
+          )
+          VALUES (
+            N'system_deleted_account', @systemPasswordHash, N'Tài khoản đã xóa',
+            N'system-deleted-account@local.invalid', N'', @studentRoleId, N'HOAT_DONG', GETDATE(), GETDATE()
+          );
+          SET @systemUserId = SCOPE_IDENTITY();
+        END
+
+        UPDATE dbo.BaoHong SET NguoiBaoID = @systemUserId WHERE NguoiBaoID = @userId;
+        UPDATE dbo.BaoHong SET KyThuatVienNhanID = @systemUserId WHERE KyThuatVienNhanID = @userId;
+        UPDATE dbo.LogBaoTri SET KyThuatVienID = @systemUserId WHERE KyThuatVienID = @userId;
+        UPDATE dbo.PhanQuyenNguoiDung SET CapQuyenBoi = NULL WHERE CapQuyenBoi = @userId;
+        DELETE FROM dbo.PhanQuyenNguoiDung WHERE NguoiDungID = @userId;
+        DELETE FROM dbo.NguoiDung
+        WHERE NguoiDungID = @userId AND TenDangNhap <> N'system_deleted_account';
+        SELECT @@ROWCOUNT AS deletedCount;
+      `);
+
+      await transaction.commit();
+      return Number(result.recordset?.[0]?.deletedCount || 0) === 1;
+    } catch (error) {
+      await transaction.rollback().catch(() => undefined);
+      throw error;
+    }
   }
 }

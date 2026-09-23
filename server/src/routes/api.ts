@@ -30,9 +30,9 @@ router.get('/stats', async (req: Request, res: Response) => {
   try {
     const stats = await SqlDatabase.getDashboardStats();
     res.json({ success: true, data: stats });
-  } catch (err) {
-    const stats = Database.getDashboardStats();
-    res.json({ success: true, data: stats });
+  } catch (error) {
+    console.error('Không thể tải thống kê từ SQL Server:', error);
+    res.status(503).json({ success: false, message: 'Không thể tải thống kê. Vui lòng thử lại sau.' });
   }
 });
 
@@ -41,9 +41,9 @@ router.get('/pois', async (req: Request, res: Response) => {
   try {
     const pois = await SqlDatabase.getPois();
     res.json({ success: true, data: pois });
-  } catch (err) {
-    const pois = Database.getPois();
-    res.json({ success: true, data: pois });
+  } catch (error) {
+    console.error('Không thể tải điểm trên bản đồ từ SQL Server:', error);
+    res.status(503).json({ success: false, message: 'Không thể tải điểm trên bản đồ. Vui lòng thử lại sau.' });
   }
 });
 
@@ -51,10 +51,63 @@ router.get('/buildings', async (req: Request, res: Response) => {
   try {
     const buildings = await SqlDatabase.getBuildings();
     res.json({ success: true, data: buildings });
-  } catch (err) {
-    const buildings = Database.getBuildings();
-    res.json({ success: true, data: buildings });
+  } catch (error) {
+    console.error('Không thể tải danh sách tòa nhà từ SQL Server:', error);
+    res.status(503).json({ success: false, message: 'Không thể tải danh sách tòa nhà. Vui lòng thử lại sau.' });
   }
+});
+
+router.post('/buildings', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+  try {
+    const { building_code, name, description, x, y, width, height, floors, color, entrance_x, entrance_y, latitude, longitude } = req.body;
+    if (!String(building_code || '').trim() || !String(name || '').trim()) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập mã và tên tòa nhà' });
+    }
+    const building = await SqlDatabase.addBuilding({
+      building_code: String(building_code).trim().toUpperCase(),
+      name: String(name).trim(),
+      description: String(description || ''),
+      x: Number(x) || 500,
+      y: Number(y) || 350,
+      width: Number(width) || 200,
+      height: Number(height) || 140,
+      floors: Math.max(1, Number(floors) || 1),
+      color: String(color || '#2563eb'),
+      entrance_x: Number(entrance_x) || Number(x) || 500,
+      entrance_y: Number(entrance_y) || Number(y) || 350,
+      latitude: latitude === undefined ? null : Number(latitude),
+      longitude: longitude === undefined ? null : Number(longitude)
+    });
+    return res.status(201).json({ success: true, data: building });
+  } catch (error: any) {
+    if (error?.number === 2627 || error?.number === 2601 || /duplicate key|unique key/i.test(String(error?.message || ''))) {
+      return res.status(409).json({
+        success: false,
+        message: `Mã tòa "${String(req.body.building_code || '').trim().toUpperCase()}" đã tồn tại. Vui lòng chọn một mã khác, ví dụ D hoặc E.`
+      });
+    }
+    return res.status(500).json({ success: false, message: error.message || 'Không thể thêm tòa nhà' });
+  }
+});
+
+router.patch('/buildings/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: 'Mã tòa không hợp lệ' });
+  try {
+    const building = await SqlDatabase.updateBuilding(id, req.body);
+    if (!building) return res.status(404).json({ success: false, message: 'Tòa/dãy không tồn tại' });
+    return res.json({ success: true, data: building });
+  } catch (error: any) { return res.status(500).json({ success: false, message: error.message || 'Không thể cập nhật tòa/dãy' }); }
+});
+
+router.delete('/buildings/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: 'Mã tòa không hợp lệ' });
+  try {
+    const deleted = await SqlDatabase.deleteBuilding(id);
+    if (!deleted) return res.status(404).json({ success: false, message: 'Tòa/dãy không tồn tại' });
+    return res.json({ success: true, message: 'Đã xóa tòa/dãy và các phòng thuộc tòa' });
+  } catch (error: any) { return res.status(500).json({ success: false, message: error.message || 'Không thể xóa tòa/dãy' }); }
 });
 
 router.get('/rooms', async (req: Request, res: Response) => {
@@ -63,11 +116,12 @@ router.get('/rooms', async (req: Request, res: Response) => {
     const floor = req.query.floor ? parseInt(req.query.floor as string) : undefined;
     const rooms = await SqlDatabase.getRooms(buildingId, floor);
     res.json({ success: true, data: rooms });
-  } catch (err) {
-    const buildingId = req.query.building_id ? parseInt(req.query.building_id as string) : undefined;
-    const floor = req.query.floor ? parseInt(req.query.floor as string) : undefined;
-    const rooms = Database.getRooms(buildingId, floor);
-    res.json({ success: true, data: rooms });
+  } catch (error) {
+    // The JSON fallback can be stale after a create, update, or delete. Never
+    // return it for rooms, otherwise the UI can show a room that no longer
+    // exists in SQL Server.
+    console.error('Không thể tải danh sách phòng từ SQL Server:', error);
+    res.status(503).json({ success: false, message: 'Không thể tải danh sách phòng. Vui lòng thử lại sau.' });
   }
 });
 
@@ -79,13 +133,9 @@ router.get('/rooms/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'Phòng học không tồn tại' });
     }
     res.json({ success: true, data: room });
-  } catch (err) {
-    const roomId = parseInt(req.params.id);
-    const room = Database.getRoomById(roomId);
-    if (!room) {
-      return res.status(404).json({ success: false, message: 'Phòng học không tồn tại' });
-    }
-    res.json({ success: true, data: room });
+  } catch (error) {
+    console.error(`Không thể tải phòng ${req.params.id} từ SQL Server:`, error);
+    res.status(503).json({ success: false, message: 'Không thể tải thông tin phòng. Vui lòng thử lại sau.' });
   }
 });
 
@@ -97,55 +147,33 @@ router.get('/rooms/qr/:qrCode', async (req: Request, res: Response) => {
     }
     const detailedRoom = await SqlDatabase.getRoomById(room.id);
     res.json({ success: true, data: detailedRoom });
-  } catch (err) {
-    const room = Database.getRoomByQr(req.params.qrCode);
-    if (!room) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy phòng tương ứng với mã QR' });
-    }
-    const detailedRoom = Database.getRoomById(room.id);
-    res.json({ success: true, data: detailedRoom });
+  } catch (error) {
+    console.error(`Không thể tải phòng từ mã QR ${req.params.qrCode}:`, error);
+    res.status(503).json({ success: false, message: 'Không thể tải thông tin phòng. Vui lòng thử lại sau.' });
   }
 });
 
 router.post('/rooms', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
-    const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y } = req.body;
-    let newRoom;
-    try {
-      newRoom = await SqlDatabase.addRoom({
-        building_id: parseInt(building_id),
-        room_number: room_number || '',
-        name: name || room_number || 'Phòng mới',
-        floor: parseInt(floor) || 1,
-        qr_code: qr_code || `QR-ROOM-${String(room_number || 'NEW').toUpperCase()}`,
-        status: status || 'ACTIVE',
-        description: description || '',
-        x: parseFloat(x) || 0,
-        y: parseFloat(y) || 0,
-        width: parseFloat(width) || 180,
-        height: parseFloat(height) || 120,
-        room_type: room_type || 'CLASSROOM',
-        door_x: parseFloat(door_x) || 50,
-        door_y: parseFloat(door_y) || 50
-      });
-    } catch {
-      newRoom = Database.addRoom({
-        building_id: parseInt(building_id),
-        room_number: room_number || '',
-        name: name || room_number || 'Phòng mới',
-        floor: parseInt(floor) || 1,
-        qr_code: qr_code || `QR-ROOM-${String(room_number || 'NEW').toUpperCase()}`,
-        status: status || 'ACTIVE',
-        description: description || '',
-        x: parseFloat(x) || 0,
-        y: parseFloat(y) || 0,
-        width: parseFloat(width) || 180,
-        height: parseFloat(height) || 120,
-        room_type: room_type || 'CLASSROOM',
-        door_x: parseFloat(door_x) || 50,
-        door_y: parseFloat(door_y) || 50
-      });
-    }
+    const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
+    const newRoom = await SqlDatabase.addRoom({
+      building_id: parseInt(building_id),
+      room_number: room_number || '',
+      name: name || room_number || 'Phòng mới',
+      floor: parseInt(floor) || 1,
+      qr_code: qr_code || `QR-ROOM-${String(room_number || 'NEW').toUpperCase()}`,
+      status: status || 'ACTIVE',
+      description: description || '',
+      x: parseFloat(x) || 0,
+      y: parseFloat(y) || 0,
+      width: parseFloat(width) || 180,
+      height: parseFloat(height) || 120,
+      room_type: room_type || 'CLASSROOM',
+      door_x: parseFloat(door_x) || 50,
+      door_y: parseFloat(door_y) || 50,
+      latitude: latitude === undefined ? null : parseFloat(latitude),
+      longitude: longitude === undefined ? null : parseFloat(longitude)
+    });
     return res.json({ success: true, data: newRoom });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message });
@@ -155,49 +183,32 @@ router.post('/rooms', authenticateToken, requireRole(['ADMIN']), async (req: Req
 router.patch('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const roomId = parseInt(req.params.id);
-    const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y } = req.body;
+    const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
 
     const allowedStatuses = ['ACTIVE', 'MAINTENANCE', 'CLOSED'];
     if (status && !allowedStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Trạng thái phòng không hợp lệ' });
     }
 
-    let updated;
-    try {
-      updated = await SqlDatabase.updateRoom(roomId, {
-        building_id: building_id === undefined ? undefined : parseInt(building_id),
-        room_number,
-        name,
-        floor: floor === undefined ? undefined : parseInt(floor),
-        qr_code,
-        status,
-        description,
-        x: x === undefined ? undefined : parseFloat(x),
-        y: y === undefined ? undefined : parseFloat(y),
-        width: width === undefined ? undefined : parseFloat(width),
-        height: height === undefined ? undefined : parseFloat(height),
-        room_type,
-        door_x: door_x === undefined ? undefined : parseFloat(door_x),
-        door_y: door_y === undefined ? undefined : parseFloat(door_y)
-      });
-    } catch {
-      updated = Database.updateRoom(roomId, {
-        building_id: building_id === undefined ? undefined : parseInt(building_id),
-        room_number,
-        name,
-        floor: floor === undefined ? undefined : parseInt(floor),
-        qr_code,
-        status,
-        description,
-        x: x === undefined ? undefined : parseFloat(x),
-        y: y === undefined ? undefined : parseFloat(y),
-        width: width === undefined ? undefined : parseFloat(width),
-        height: height === undefined ? undefined : parseFloat(height),
-        room_type,
-        door_x: door_x === undefined ? undefined : parseFloat(door_x),
-        door_y: door_y === undefined ? undefined : parseFloat(door_y)
-      });
-    }
+    const updated = await SqlDatabase.updateRoom(roomId, {
+      building_id: building_id === undefined ? undefined : parseInt(building_id),
+      room_number,
+      name,
+      floor: floor === undefined ? undefined : parseInt(floor),
+      qr_code,
+      status,
+      description,
+      x: x === undefined ? undefined : parseFloat(x),
+      y: y === undefined ? undefined : parseFloat(y),
+      width: width === undefined ? undefined : parseFloat(width),
+      height: height === undefined ? undefined : parseFloat(height),
+      room_type,
+      door_x: door_x === undefined ? undefined : parseFloat(door_x),
+      door_y: door_y === undefined ? undefined : parseFloat(door_y),
+      latitude: latitude === undefined ? undefined : parseFloat(latitude),
+      longitude: longitude === undefined ? undefined : parseFloat(longitude)
+    });
+
     if (!updated) return res.status(404).json({ success: false, message: 'Phòng không tồn tại' });
     return res.json({ success: true, data: updated });
   } catch (error: any) {
@@ -207,12 +218,23 @@ router.patch('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req
 
 router.delete('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const roomId = parseInt(req.params.id);
-  try {
-    await SqlDatabase.deleteRoom(roomId);
-  } catch {
-    Database.deleteRoom(roomId);
+  if (!Number.isInteger(roomId) || roomId <= 0) {
+    return res.status(400).json({ success: false, message: 'Mã phòng không hợp lệ' });
   }
-  return res.json({ success: true, message: 'Đã xóa phòng' });
+
+  try {
+    const deleted = await SqlDatabase.deleteRoom(roomId);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Phòng không tồn tại' });
+    }
+    return res.json({ success: true, message: 'Đã xóa phòng' });
+  } catch (error: any) {
+    console.error(`[DELETE /rooms/${roomId}] Xóa trong SQL Server thất bại:`, error);
+    return res.status(500).json({
+      success: false,
+      message: `Không thể xóa phòng trong cơ sở dữ liệu chính. Có thể phòng này vẫn còn liên kết dữ liệu khác. Chi tiết: ${error.message}`
+    });
+  }
 });
 
 // ================= CATEGORIES & DEVICES =================
@@ -289,38 +311,20 @@ router.post('/devices', authenticateToken, requirePermission('MANAGE_DEVICES'), 
   try {
     const { room_id, category_id, device_code, name, model, serial_number, is_portable, purchase_date, warranty_expiry, specifications } = req.body;
     const qr_code = `QR-DEV-${device_code.toUpperCase()}`;
-    let newDevice;
-    try {
-      newDevice = await SqlDatabase.addDevice({
-        room_id: room_id ? parseInt(room_id) : null,
-        category_id: parseInt(category_id),
-        device_code,
-        name,
-        model: model || '',
-        serial_number: serial_number || '',
-        status: 'ACTIVE',
-        is_portable: Boolean(is_portable),
-        qr_code,
-        purchase_date: purchase_date || new Date().toISOString().slice(0, 10),
-        warranty_expiry: warranty_expiry || '',
-        specifications: specifications || {}
-      });
-    } catch {
-      newDevice = Database.addDevice({
-        room_id: room_id ? parseInt(room_id) : null,
-        category_id: parseInt(category_id),
-        device_code,
-        name,
-        model: model || '',
-        serial_number: serial_number || '',
-        status: 'ACTIVE',
-        is_portable: Boolean(is_portable),
-        qr_code,
-        purchase_date: purchase_date || new Date().toISOString().slice(0, 10),
-        warranty_expiry: warranty_expiry || '',
-        specifications: specifications || {}
-      });
-    }
+    const newDevice = await SqlDatabase.addDevice({
+      room_id: room_id ? parseInt(room_id) : null,
+      category_id: parseInt(category_id),
+      device_code,
+      name,
+      model: model || '',
+      serial_number: serial_number || '',
+      status: 'ACTIVE',
+      is_portable: Boolean(is_portable),
+      qr_code,
+      purchase_date: purchase_date || new Date().toISOString().slice(0, 10),
+      warranty_expiry: warranty_expiry || '',
+      specifications: specifications || {}
+    });
     res.json({ success: true, data: newDevice });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -330,16 +334,15 @@ router.post('/devices', authenticateToken, requirePermission('MANAGE_DEVICES'), 
 router.patch('/devices/:id/status', authenticateToken, requirePermission('MANAGE_DEVICES'), async (req: Request, res: Response) => {
   const devId = parseInt(req.params.id);
   const { status } = req.body;
-  let updated;
   try {
-    updated = await SqlDatabase.updateDeviceStatus(devId, status);
-  } catch {
-    updated = Database.updateDeviceStatus(devId, status);
+    const updated = await SqlDatabase.updateDeviceStatus(devId, status);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
   }
-  if (!updated) {
-    return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
-  }
-  res.json({ success: true, data: updated });
 });
 
 router.patch('/devices/:id', authenticateToken, requirePermission('MANAGE_DEVICES'), async (req: Request, res: Response) => {
@@ -352,38 +355,21 @@ router.patch('/devices/:id', authenticateToken, requirePermission('MANAGE_DEVICE
       return res.status(400).json({ success: false, message: 'Trạng thái thiết bị không hợp lệ' });
     }
 
-    let updated;
-    try {
-      updated = await SqlDatabase.updateDevice(devId, {
-        room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
-        category_id: category_id === undefined ? undefined : parseInt(category_id),
-        device_code,
-        name,
-        model,
-        serial_number,
-        status,
-        is_portable,
-        purchase_date,
-        warranty_expiry,
-        specifications,
-        qr_code: device_code ? `QR-DEV-${device_code.toUpperCase()}` : undefined
-      });
-    } catch {
-      updated = Database.updateDevice(devId, {
-        room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
-        category_id: category_id === undefined ? undefined : parseInt(category_id),
-        device_code,
-        name,
-        model,
-        serial_number,
-        status,
-        is_portable,
-        purchase_date,
-        warranty_expiry,
-        specifications,
-        qr_code: device_code ? `QR-DEV-${device_code.toUpperCase()}` : undefined
-      });
-    }
+    const updated = await SqlDatabase.updateDevice(devId, {
+      room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
+      category_id: category_id === undefined ? undefined : parseInt(category_id),
+      device_code,
+      name,
+      model,
+      serial_number,
+      status,
+      is_portable,
+      purchase_date,
+      warranty_expiry,
+      specifications,
+      qr_code: device_code ? `QR-DEV-${device_code.toUpperCase()}` : undefined
+    });
+
     if (!updated) return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
     return res.json({ success: true, data: updated });
   } catch (error: any) {
@@ -395,10 +381,14 @@ router.delete('/devices/:id', authenticateToken, requirePermission('MANAGE_DEVIC
   const devId = parseInt(req.params.id);
   try {
     await SqlDatabase.deleteDevice(devId);
-  } catch {
-    Database.deleteDevice(devId);
+    return res.json({ success: true, message: 'Đã xóa thiết bị' });
+  } catch (error: any) {
+    console.error(`[DELETE /devices/${devId}] Xóa trong SQL Server thất bại:`, error);
+    return res.status(500).json({
+      success: false,
+      message: `Không thể xóa thiết bị. Có thể thiết bị này vẫn còn liên kết dữ liệu khác. Chi tiết: ${error.message}`
+    });
   }
-  return res.json({ success: true, message: 'Đã xóa thiết bị' });
 });
 
 // ================= MANUALS & FAQS =================

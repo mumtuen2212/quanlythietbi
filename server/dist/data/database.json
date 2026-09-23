@@ -554,7 +554,7 @@
       "full_name": "Quản trị viên Hệ thống (Admin)",
       "email": "admin@school.edu.vn",
       "phone": "0909.000.001",
-      "password_hash": "$2b$10$EFl3uiQXv0VSooY.fuchleU5CjkJVQmk9s7pPyRdbtsgPMHLXZMzi",
+      "password_hash": "$2b$10$Vps9QWOyMYKIDoa2h1b3xOvYiv7iAums0TzTLbvO6c9EUzziKlL2u",
       "permissions": [
         "MANAGE_DEVICES",
         "MANAGE_ROOMS",
@@ -573,13 +573,26 @@
       "full_name": "KTV. Trần Minh Quang",
       "email": "quang.tm@school.edu.vn",
       "phone": "0909.000.002",
-      "password_hash": "$2b$10$niGfwbr.G1tJHZxmLhGCcuyoui0wB7VMU9fn0j9rixWWa2.MViyZC",
+      "password_hash": "$2b$10$YyOy4eb7/XkhlTt9lPN4COjFeD3cc9vD0niqRJO3hSyKUOHzBFV2C",
       "permissions": [
         "MANAGE_DEVICES",
         "VIEW_REPORTS",
         "RESOLVE_REPORTS",
-        "CREATE_REPORT",
-        "GRANT_PERMISSIONS"
+        "CREATE_REPORT"
+      ],
+      "created_at": "2024-01-01"
+    },
+    {
+      "id": 3,
+      "username": "teacher",
+      "role_name": "TEACHER",
+      "full_name": "ThS. Nguyễn Văn Hùng",
+      "email": "hung.nv@school.edu.vn",
+      "phone": "0912.345.678",
+      "password_hash": "$2b$10$ARePmi8oQ3obPpxUCdne9Or3lb/ZckSC2ST..2EyVvjvRl1dc7awG",
+      "permissions": [
+        "VIEW_REPORTS",
+        "CREATE_REPORT"
       ],
       "created_at": "2024-01-01"
     },
@@ -590,7 +603,7 @@
       "full_name": "Sinh viên Nguyễn Văn An",
       "email": "an.nv@student.school.edu.vn",
       "phone": "0987.654.321",
-      "password_hash": "$2b$10$FZ7o2EXjdqb.w18DUcEfr.qKQuvVohi9rjQzL/j6jFqKZX60wizVG",
+      "password_hash": "$2b$10$rzTFcrn8auZQU.6lQf1D.ed1BhUsMR..di2DGwnjTFMBPErT0IztC",
       "permissions": [
         "CREATE_REPORT"
       ],

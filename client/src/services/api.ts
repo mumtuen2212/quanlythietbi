@@ -49,6 +49,20 @@ export const ApiService = {
     return res.data.data;
   },
 
+  createBuilding: async (payload: Omit<Building, 'id'>): Promise<Building> => {
+    const res = await api.post<{ success: boolean; data: Building }>('/buildings', payload);
+    return res.data.data;
+  },
+
+  updateBuilding: async (id: number, payload: Partial<Building>): Promise<Building> => {
+    const res = await api.patch<{ success: boolean; data: Building }>(`/buildings/${id}`, payload);
+    return res.data.data;
+  },
+
+  deleteBuilding: async (id: number): Promise<void> => {
+    await api.delete(`/buildings/${id}`);
+  },
+
   getRooms: async (buildingId?: number, floor?: number): Promise<Room[]> => {
     const res = await api.get<{ success: boolean; data: Room[] }>('/rooms', {
       params: { building_id: buildingId, floor }
@@ -182,10 +196,21 @@ export const ApiService = {
     return res.data.data;
   },
 
+  loginWithGoogle: async (credential: string): Promise<AuthResponse> => {
+    const res = await api.post<{ success: boolean; message: string; data: AuthResponse }>('/auth/google', { credential });
+    return res.data.data;
+  },
+
+  changePassword: async (current_password: string, new_password: string, confirm_password: string): Promise<string> => {
+    const res = await api.post<{ success: boolean; message: string }>('/auth/change-password', { current_password, new_password, confirm_password });
+    return res.data.message;
+  },
+
   register: async (payload: RegisterPayload): Promise<AuthResponse> => {
     const res = await api.post<{ success: boolean; message: string; data: AuthResponse }>('/auth/register', payload);
     return res.data.data;
   },
+
 
   getMe: async (): Promise<User> => {
     const res = await api.get<{ success: boolean; data: User }>('/auth/me');

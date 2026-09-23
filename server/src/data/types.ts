@@ -70,6 +70,8 @@ export interface CampusPOI {
   x: number;
   y: number;
   description?: string;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface Building {
@@ -85,6 +87,8 @@ export interface Building {
   color: string;
   entrance_x: number;
   entrance_y: number;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface Room {
@@ -104,6 +108,8 @@ export interface Room {
   room_type: 'CLASSROOM' | 'LAB' | 'HALL' | 'STAIRS' | 'WC' | 'ELEVATOR' | 'OFFICE';
   door_x: number;
   door_y: number;
+  latitude?: number | null;
+  longitude?: number | null;
   devices?: Device[];
   pendingReportsCount?: number;
 }

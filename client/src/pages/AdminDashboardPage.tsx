@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   Settings, 
   AlertTriangle, 
@@ -21,6 +21,7 @@ import {
   UserPlus,
   Pencil,
   Trash2,
+  MapPin,
   X
 } from 'lucide-react';
 import { ApiService } from '../services/api';
@@ -41,6 +42,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { FloorPlanMap } from '../components/FloorPlanMap';
+import { LeafletCampusMap } from '../components/LeafletCampusMap';
 
 export const AdminDashboardPage: React.FC = () => {
   const { user: currentUser, hasPermission, refreshUser } = useAuth();
@@ -87,6 +89,12 @@ export const AdminDashboardPage: React.FC = () => {
 
   // Rooms CRUD State
   const [showRoomModal, setShowRoomModal] = useState(false);
+  const [showBuildingModal, setShowBuildingModal] = useState(false);
+  const [showBuildingManager, setShowBuildingManager] = useState(false);
+  const [editingBuilding, setEditingBuilding] = useState<Building | null>(null);
+  const [showBuildingMapPicker, setShowBuildingMapPicker] = useState(false);
+  const [showRoomMapPicker, setShowRoomMapPicker] = useState(false);
+  const [buildingLoadError, setBuildingLoadError] = useState(false);
   const [roomModal, setRoomModal] = useState<{ mode: 'create' | 'edit'; room?: Room } | null>(null);
   const [roomForm, setRoomForm] = useState({
     building_id: '1',
@@ -102,10 +110,20 @@ export const AdminDashboardPage: React.FC = () => {
     height: '120',
     room_type: 'CLASSROOM' as Room['room_type'],
     door_x: '50',
-    door_y: '50'
+    door_y: '50',
+    latitude: '',
+    longitude: ''
+  });
+  const [buildingForm, setBuildingForm] = useState({
+    building_code: '', name: '', description: '', floors: '1', color: '#2563eb',
+    x: '500', y: '350', width: '200', height: '140', entrance_x: '500', entrance_y: '350', latitude: '', longitude: ''
   });
 
+  const didLoadInitialDataRef = useRef(false);
+
   useEffect(() => {
+    if (didLoadInitialDataRef.current) return;
+    didLoadInitialDataRef.current = true;
     loadAllData();
   }, []);
 
@@ -121,27 +139,42 @@ export const AdminDashboardPage: React.FC = () => {
     }
   };
 
+  // Buildings are required for the room form. Keep this request independent so
+  // an unrelated dashboard request cannot make the building selector empty.
+  const loadBuildingsData = async () => {
+    try {
+      const buildingsData = await ApiService.getBuildings();
+      setBuildings(buildingsData);
+      setBuildingLoadError(false);
+      return buildingsData;
+    } catch (err) {
+      console.error('Cannot load buildings:', err);
+      setBuildingLoadError(true);
+      return [];
+    }
+  };
+
   const loadAllData = async () => {
+    const buildingsRequest = loadBuildingsData();
     try {
       setLoading(true);
-      const [reportsData, devicesData, roomsData, buildingsData, catData, logsData] = await Promise.all([
+      const [reportsData, devicesData, roomsData, catData, logsData] = await Promise.all([
         ApiService.getIncidentReports(),
         ApiService.getDevices(),
         ApiService.getRooms(),
-        ApiService.getBuildings(),
         ApiService.getCategories(),
         ApiService.getMaintenanceLogs()
       ]);
       setReports(reportsData);
       setDevices(devicesData);
       setRooms(roomsData);
-      setBuildings(buildingsData);
       setCategories(catData);
       setLogs(logsData);
       loadUsersData();
     } catch (err) {
       console.error('Error loading admin data:', err);
     } finally {
+      await buildingsRequest;
       setLoading(false);
     }
   };
@@ -222,7 +255,7 @@ export const AdminDashboardPage: React.FC = () => {
     if (!window.confirm(`Xóa tài khoản ${u.full_name}?`)) return;
     try {
       await ApiService.deleteUser(u.id);
-      setUsersList(prev => prev.filter(item => item.id !== u.id));
+      await loadUsersData();
     } catch (err: any) {
       setUserMsg({ id: u.id, text: err.response?.data?.message || 'Lỗi khi xóa tài khoản.', error: true });
     }
@@ -301,13 +334,14 @@ export const AdminDashboardPage: React.FC = () => {
     if (!window.confirm(`Xóa thiết bị ${device.name}?`)) return;
     try {
       await ApiService.deleteDevice(device.id);
-      setDevices(prev => prev.filter(item => item.id !== device.id));
+      await loadAllData();
     } catch (err: any) {
       window.alert(err.response?.data?.message || 'Không thể xóa thiết bị.');
     }
   };
 
   const openCreateRoom = () => {
+    setShowRoomMapPicker(false);
     setRoomForm({
       building_id: '1',
       room_number: '',
@@ -322,13 +356,72 @@ export const AdminDashboardPage: React.FC = () => {
       height: '120',
       room_type: 'CLASSROOM',
       door_x: '50',
-      door_y: '50'
+      door_y: '50',
+      latitude: '',
+      longitude: ''
     });
     setRoomModal({ mode: 'create' });
     setShowRoomModal(true);
   };
 
+  const openCreateBuilding = () => {
+    setEditingBuilding(null);
+    setShowBuildingMapPicker(false);
+    setBuildingForm({ building_code: '', name: '', description: '', floors: '1', color: '#2563eb', x: '500', y: '350', width: '200', height: '140', entrance_x: '500', entrance_y: '350', latitude: '', longitude: '' });
+    setShowBuildingModal(true);
+  };
+
+  const openEditBuilding = (building: Building) => {
+    setEditingBuilding(building);
+    setShowBuildingMapPicker(false);
+    setBuildingForm({ building_code: building.building_code, name: building.name, description: building.description || '', floors: String(building.floors), color: building.color, x: String(building.x), y: String(building.y), width: String(building.width), height: String(building.height), entrance_x: String(building.entrance_x), entrance_y: String(building.entrance_y), latitude: building.latitude == null ? '' : String(building.latitude), longitude: building.longitude == null ? '' : String(building.longitude) });
+    setShowBuildingManager(false);
+    setShowBuildingModal(true);
+  };
+
+  const handleSaveBuilding = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try {
+      const payload = {
+        building_code: buildingForm.building_code,
+        name: buildingForm.name,
+        description: buildingForm.description,
+        floors: Number(buildingForm.floors),
+        color: buildingForm.color,
+        x: Number(buildingForm.x),
+        y: Number(buildingForm.y),
+        width: Number(buildingForm.width),
+        height: Number(buildingForm.height),
+        entrance_x: Number(buildingForm.entrance_x),
+        entrance_y: Number(buildingForm.entrance_y),
+        latitude: buildingForm.latitude ? Number(buildingForm.latitude) : null,
+        longitude: buildingForm.longitude ? Number(buildingForm.longitude) : null
+      };
+      const building = editingBuilding ? await ApiService.updateBuilding(editingBuilding.id, payload) : await ApiService.createBuilding(payload);
+      setBuildings(prev => editingBuilding ? prev.map(item => item.id === building.id ? building : item) : [...prev, building]);
+      setRoomForm(prev => ({ ...prev, building_id: String(building.id) }));
+      setShowBuildingModal(false);
+      setShowBuildingMapPicker(false);
+      setEditingBuilding(null);
+      setBuildingForm({ building_code: '', name: '', description: '', floors: '1', color: '#2563eb', x: '500', y: '350', width: '200', height: '140', entrance_x: '500', entrance_y: '350', latitude: '', longitude: '' });
+    } catch (error: any) {
+      window.alert(error.response?.data?.message || 'Không thể lưu tòa nhà.');
+    }
+  };
+
+  const handleDeleteBuilding = async (building: Building) => {
+    if (!window.confirm(`Xóa ${building.name} và toàn bộ phòng thuộc tòa này? Thiết bị và phiếu báo hỏng sẽ được gỡ liên kết.`)) return;
+    try {
+      await ApiService.deleteBuilding(building.id);
+      setBuildings(prev => prev.filter(item => item.id !== building.id));
+      setRooms(prev => prev.filter(room => room.building_id !== building.id));
+    } catch (error: any) {
+      window.alert(error.response?.data?.message || 'Không thể xóa tòa nhà.');
+    }
+  };
+
   const openEditRoom = (room: Room) => {
+    setShowRoomMapPicker(false);
     setRoomForm({
       building_id: String(room.building_id),
       room_number: room.room_number,
@@ -343,7 +436,9 @@ export const AdminDashboardPage: React.FC = () => {
       height: String(room.height),
       room_type: room.room_type,
       door_x: String(room.door_x),
-      door_y: String(room.door_y)
+      door_y: String(room.door_y),
+      latitude: room.latitude == null ? '' : String(room.latitude),
+      longitude: room.longitude == null ? '' : String(room.longitude)
     });
     setRoomModal({ mode: 'edit', room });
     setShowRoomModal(true);
@@ -367,7 +462,9 @@ export const AdminDashboardPage: React.FC = () => {
           height: Number(roomForm.height),
           room_type: roomForm.room_type,
           door_x: Number(roomForm.door_x),
-          door_y: Number(roomForm.door_y)
+          door_y: Number(roomForm.door_y),
+          latitude: roomForm.latitude ? Number(roomForm.latitude) : null,
+          longitude: roomForm.longitude ? Number(roomForm.longitude) : null
         });
         setRooms(prev => prev.map(item => item.id === updated.id ? { ...item, ...updated } : item));
       } else {
@@ -385,7 +482,9 @@ export const AdminDashboardPage: React.FC = () => {
           height: Number(roomForm.height),
           room_type: roomForm.room_type,
           door_x: Number(roomForm.door_x),
-          door_y: Number(roomForm.door_y)
+          door_y: Number(roomForm.door_y),
+          latitude: roomForm.latitude ? Number(roomForm.latitude) : null,
+          longitude: roomForm.longitude ? Number(roomForm.longitude) : null
         });
         setRooms(prev => [...prev, created]);
       }
@@ -405,7 +504,9 @@ export const AdminDashboardPage: React.FC = () => {
         height: '120',
         room_type: 'CLASSROOM',
         door_x: '50',
-        door_y: '50'
+        door_y: '50',
+        latitude: '',
+        longitude: ''
       });
     } catch (err: any) {
       window.alert(err.response?.data?.message || 'Không thể lưu phòng.');
@@ -428,6 +529,32 @@ export const AdminDashboardPage: React.FC = () => {
     }));
   };
 
+  const handleRoomMapPick = ({ lat, lng }: { lat: number; lng: number }) => {
+    const building = buildings.find(item => String(item.id) === roomForm.building_id);
+    if (!building) {
+      window.alert('Hãy chọn tòa nhà trước khi chọn vị trí phòng trên bản đồ.');
+      return;
+    }
+
+    const [buildingLat, buildingLng] = Number.isFinite(building.latitude) && Number.isFinite(building.longitude) ? [Number(building.latitude), Number(building.longitude)] : [
+      10.9822 - building.y * 0.000006,
+      106.6732 + building.x * 0.000006
+    ];
+    // Translate a click near the building into the 900 x 320 floor-plan space.
+    const x = Math.round(Math.max(0, Math.min(900, 450 + (lng - buildingLng) * 1800000)));
+    const y = Math.round(Math.max(0, Math.min(320, 160 - (lat - buildingLat) * 1400000)));
+    setRoomForm(previous => ({
+      ...previous,
+      x: String(x),
+      y: String(y),
+      latitude: String(lat),
+      longitude: String(lng),
+      door_x: String(Math.max(20, Math.round(x + 30))),
+      door_y: String(Math.max(20, Math.round(y + 30)))
+    }));
+    setShowRoomMapPicker(false);
+  };
+
   const handleFloorPlanMapPick = (event: React.MouseEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const ratioX = (event.clientX - rect.left) / rect.width;
@@ -448,9 +575,23 @@ export const AdminDashboardPage: React.FC = () => {
     if (!window.confirm(`Xóa phòng ${room.room_number} (${room.name})?`)) return;
     try {
       await ApiService.deleteRoom(room.id);
-      setRooms(prev => prev.filter(item => item.id !== room.id));
+      // Refresh this list from the source of truth immediately. Do not wait for
+      // unrelated dashboard requests, which could otherwise leave a stale row.
+      const updatedRooms = await ApiService.getRooms();
+      setRooms(updatedRooms);
       setDevices(prev => prev.map(device => device.room_id === room.id ? { ...device, room_id: null } : device));
     } catch (err: any) {
+      if (err.response?.status === 404) {
+        // The room was already removed but an older list was still visible.
+        // Refresh it so the stale row disappears without requiring a full reload.
+        try {
+          setRooms(await ApiService.getRooms());
+          window.alert('Phòng này đã được xóa trước đó. Danh sách đã được đồng bộ lại.');
+          return;
+        } catch {
+          // Fall through to the regular error if the refresh also fails.
+        }
+      }
       window.alert(err.response?.data?.message || 'Không thể xóa phòng.');
     }
   };
@@ -671,15 +812,29 @@ export const AdminDashboardPage: React.FC = () => {
               </h2>
               <p className="text-xs text-slate-500 mt-1">Thêm, sửa, xóa phòng và gắn vị trí tầng, toạ độ, loại phòng và thiết bị trong phòng.</p>
             </div>
-            {canManageRoomCrud && (
-              <button
-                type="button"
-                onClick={openCreateRoom}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Thêm phòng</span>
-              </button>
+               {canManageRoomCrud && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openCreateBuilding}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all"
+                >
+                  <Building2 className="w-4 h-4" />
+                  <span>Thêm tòa</span>
+                </button>
+                <button type="button" onClick={() => setShowBuildingManager(true)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 font-bold text-xs shadow-sm transition-all">
+                  <Building2 className="w-4 h-4" />
+                  <span>Quản lý tòa</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateRoom}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Thêm phòng</span>
+                </button>
+              </div>
             )}
           </div>
 
@@ -1106,15 +1261,95 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
+      {showBuildingManager && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+              <div><h3 className="text-lg font-extrabold text-slate-900">Quản lý tòa / dãy</h3><p className="text-xs text-slate-500 mt-1">Sửa tên, số tầng, vị trí hoặc xóa tòa cùng các phòng thuộc tòa.</p></div>
+              <button type="button" onClick={() => setShowBuildingManager(false)} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="overflow-y-auto p-4 space-y-2">
+              {buildings.map(building => <div key={building.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3">
+                <span className="rounded-lg px-2 py-1 text-xs font-black text-white" style={{ backgroundColor: building.color || '#2563eb' }}>{building.building_code}</span>
+                <div className="min-w-0 flex-1"><p className="font-bold text-sm text-slate-900 truncate">{building.name}</p><p className="text-[11px] text-slate-500">{building.floors} tầng</p></div>
+                <button type="button" onClick={() => openEditBuilding(building)} className="p-2 rounded-lg text-sky-700 hover:bg-sky-50" title="Sửa tòa"><Pencil className="w-4 h-4" /></button>
+                <button type="button" onClick={() => handleDeleteBuilding(building)} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50" title="Xóa tòa"><Trash2 className="w-4 h-4" /></button>
+              </div>)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBuildingModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900">{editingBuilding ? 'Sửa tòa nhà' : 'Thêm tòa nhà'}</h3>
+                <p className="text-xs text-slate-500 mt-1">{editingBuilding ? 'Cập nhật thông tin và vị trí tòa trong SQL.' : 'Tòa mới sẽ xuất hiện trực tiếp trên bản đồ.'}</p>
+              </div>
+              <button type="button" onClick={() => { setShowBuildingModal(false); setShowBuildingMapPicker(false); }} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" title="Đóng"><X className="w-4 h-4" /></button>
+            </div>
+            <form onSubmit={handleSaveBuilding} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs font-bold text-slate-700">Mã tòa *<input value={buildingForm.building_code} onChange={e => setBuildingForm({ ...buildingForm, building_code: e.target.value })} placeholder="Ví dụ: D" required className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" /></label>
+                <label className="text-xs font-bold text-slate-700">Số tầng *<input type="number" min="1" value={buildingForm.floors} onChange={e => setBuildingForm({ ...buildingForm, floors: e.target.value })} required className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" /></label>
+              </div>
+              <label className="block text-xs font-bold text-slate-700">Tên tòa *<input value={buildingForm.name} onChange={e => setBuildingForm({ ...buildingForm, name: e.target.value })} placeholder="Ví dụ: Tòa nhà D" required className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" /></label>
+              <label className="block text-xs font-bold text-slate-700">Mô tả<textarea value={buildingForm.description} onChange={e => setBuildingForm({ ...buildingForm, description: e.target.value })} rows={2} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" /></label>
+              <div className="grid grid-cols-3 gap-3">
+                <label className="text-xs font-bold text-slate-700">Màu<input type="color" value={buildingForm.color} onChange={e => setBuildingForm({ ...buildingForm, color: e.target.value })} className="w-full h-10 mt-1 p-1 bg-slate-50 border border-slate-200 rounded-xl" /></label>
+                <label className="text-xs font-bold text-slate-700">Vị trí X<input type="number" value={buildingForm.x} onChange={e => setBuildingForm({ ...buildingForm, x: e.target.value, entrance_x: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" /></label>
+                <label className="text-xs font-bold text-slate-700">Vị trí Y<input type="number" value={buildingForm.y} onChange={e => setBuildingForm({ ...buildingForm, y: e.target.value, entrance_y: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" /></label>
+              </div>
+              <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-extrabold text-sky-800">Chọn vị trí trực tiếp trên bản đồ</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Bấm đúng nơi muốn đặt tòa nhà; tọa độ sẽ tự điền.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowBuildingMapPicker(value => !value)} className="shrink-0 rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-sky-700">
+                    {showBuildingMapPicker ? 'Ẩn bản đồ' : 'Chọn trên bản đồ'}
+                  </button>
+                </div>
+                {showBuildingMapPicker && (
+                  <div className="mt-3 h-80 overflow-hidden rounded-xl border border-slate-200">
+                    <LeafletCampusMap
+                      buildings={buildings}
+                      pois={[]}
+                      rooms={[]}
+                      selectedBuildingId={null}
+                      onSelectBuilding={() => undefined}
+                      pickMode
+                      onPickMapPosition={({ lat, lng }) => {
+                        const x = Math.round(Math.max(0, Math.min(1000, (lng - 106.6732) / 0.000006)));
+                        const y = Math.round(Math.max(0, Math.min(700, (10.9822 - lat) / 0.000006)));
+                        setBuildingForm(previous => ({ ...previous, x: String(x), y: String(y), entrance_x: String(x), entrance_y: String(y), latitude: String(lat), longitude: String(lng) }));
+                        setShowBuildingMapPicker(false);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700">{editingBuilding ? 'Lưu tòa nhà' : 'Thêm tòa nhà'}</button>
+                <button type="button" onClick={() => { setShowBuildingModal(false); setShowBuildingMapPicker(false); }} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">Hủy</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Room management modal */}
       {showRoomModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl space-y-5 animate-in fade-in zoom-in">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl my-8 max-h-[90vh] flex flex-col animate-in fade-in zoom-in">
+            <div className="flex items-center justify-between px-6 sm:px-8 pt-6 sm:pt-8 pb-4 sticky top-0 bg-white rounded-t-3xl z-10 shrink-0">
               <h3 className="text-lg font-extrabold text-slate-900">{roomModal?.mode === 'edit' ? 'Sửa thông tin phòng' : 'Thêm phòng mới'}</h3>
               <button type="button" onClick={() => { setShowRoomModal(false); setRoomModal(null); }} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" title="Đóng"><X className="w-4 h-4" /></button>
             </div>
 
+            <div className="overflow-y-auto px-6 sm:px-8 pb-6 sm:pb-8 space-y-5">
             <form onSubmit={handleSaveRoom} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1130,9 +1365,16 @@ export const AdminDashboardPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-700">Tòa nhà</label>
-                  <select value={roomForm.building_id} onChange={e => setRoomForm({ ...roomForm, building_id: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                    {buildings.map(b => <option key={b.id} value={b.id}>[{b.building_code}] {b.name}</option>)}
-                  </select>
+                  {buildings.length > 0 ? (
+                    <select value={roomForm.building_id} onChange={e => setRoomForm({ ...roomForm, building_id: e.target.value })} className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                      {buildings.map(b => <option key={b.id} value={b.id}>[{b.building_code}] {b.name}</option>)}
+                    </select>
+                  ) : (
+                    <div className="mt-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                      {buildingLoadError ? 'Không tải được danh sách tòa nhà.' : 'Chưa có tòa nhà nào.'}
+                      <button type="button" onClick={loadBuildingsData} className="ml-2 font-bold underline">Tải lại</button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-700">Tầng</label>
@@ -1176,13 +1418,38 @@ export const AdminDashboardPage: React.FC = () => {
               <div className="rounded-2xl border border-sky-100 bg-sky-50/40 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <span className="text-[11px] font-extrabold text-sky-800">Chọn vị trí trên sơ đồ tầng</span>
-                    <p className="text-[10px] text-slate-500 mt-1">Nhấn vào sơ đồ lớn để lấy x:y và cập nhật tọa độ phòng.</p>
+                    <span className="text-[11px] font-extrabold text-sky-800">Chọn vị trí phòng</span>
+                    <p className="text-[10px] text-slate-500 mt-1">Bấm trên bản đồ hoặc sơ đồ tầng để lấy x:y.</p>
                   </div>
-                  <span className="text-[11px] font-bold text-slate-700">x:{roomForm.x} · y:{roomForm.y}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-700">{roomForm.latitude ? `${roomForm.latitude}, ${roomForm.longitude}` : `x:${roomForm.x} · y:${roomForm.y}`}</span>
+                    <button
+                      type="button"
+                      disabled={buildings.length === 0}
+                      onClick={() => setShowRoomMapPicker(value => !value)}
+                      className="rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {showRoomMapPicker ? 'Ẩn bản đồ' : 'Chọn trên bản đồ'}
+                    </button>
+                  </div>
                 </div>
 
-                {buildings.length > 0 && (
+                {showRoomMapPicker && buildings.length > 0 && (
+                  <div className="mt-3 h-80 overflow-hidden rounded-xl border border-slate-200">
+                    <LeafletCampusMap
+                      buildings={buildings}
+                      pois={[]}
+                      rooms={[]}
+                      selectedBuildingId={Number(roomForm.building_id) || null}
+                      onSelectBuilding={() => undefined}
+                      pickMode
+                      pickModeMessage="Bấm gần tòa đã chọn để lấy vị trí phòng"
+                      onPickMapPosition={handleRoomMapPick}
+                    />
+                  </div>
+                )}
+
+                {buildings.length > 0 ? (
                   <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200">
                     <FloorPlanMap
                       building={buildings.find(b => String(b.id) === roomForm.building_id) || buildings[0]}
@@ -1194,6 +1461,8 @@ export const AdminDashboardPage: React.FC = () => {
                       onMapClick={handleFloorMapPick}
                     />
                   </div>
+                ) : (
+                  <p className="mt-3 text-[11px] text-amber-700">Hãy tải được danh sách tòa nhà trước, sau đó sơ đồ tầng sẽ hiện tại đây.</p>
                 )}
               </div>
 
@@ -1231,11 +1500,12 @@ export const AdminDashboardPage: React.FC = () => {
                 <button type="submit" className="flex-1 py-2.5 rounded-xl bg-sky-600 text-white font-bold text-xs hover:bg-sky-700">
                   {roomModal?.mode === 'edit' ? 'Lưu phòng' : 'Thêm phòng'}
                 </button>
-                <button type="button" onClick={() => { setShowRoomModal(false); setRoomModal(null); }} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">
+                  <button type="button" onClick={() => { setShowRoomModal(false); setRoomModal(null); }} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">
                   Hủy
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
       )}

@@ -14,7 +14,8 @@ import {
   Volume2,
   Wind,
   Navigation,
-  Compass
+  Compass,
+  ChevronDown
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { Building, Room, DashboardStats, CampusPOI } from '../types';
@@ -39,6 +40,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
   const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(1);
   const [selectedFloor, setSelectedFloor] = useState<number>(3);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [expandedBuildingIds, setExpandedBuildingIds] = useState<Set<number>>(() => new Set());
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
 
@@ -74,6 +76,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
       if (safeBuildings.length > 0) {
         setSelectedBuildingId(safeBuildings[0].id);
+        setExpandedBuildingIds(new Set([safeBuildings[0].id]));
       }
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -84,6 +87,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
   const handleSelectBuildingFromMap = (bldgId: number) => {
     setSelectedBuildingId(bldgId);
+    setExpandedBuildingIds(previous => new Set([...previous, bldgId]));
     setSelectedFloor(bldgId === 1 ? 3 : 1);
     setViewMode('floor');
   };
@@ -160,6 +164,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
   const handleSelectRoom = (room: Room) => {
     setSelectedRoom(room);
     setSelectedBuildingId(room.building_id);
+    setExpandedBuildingIds(previous => new Set([...previous, room.building_id]));
     setSelectedFloor(room.floor);
     setViewMode('leaflet');
   };
@@ -189,13 +194,18 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
       (room.name || '').toLowerCase().includes(normalizedSearch) ||
       (room.building_code || '').toLowerCase().includes(normalizedSearch);
   });
-  const groupedMapRooms = mapRooms.reduce<Record<string, Room[]>>((groups, room) => {
-    const groupKey = `${room.building_code || `Tòa ${room.building_id}`}|${room.floor}`;
-    groups[groupKey] = groups[groupKey] || [];
-    groups[groupKey].push(room);
+  const campusAreaFor = (code: string) => {
+    if (code === 'HT1') return 'HỘI TRƯỜNG';
+    if (code.startsWith('KTH-I4') || code.startsWith('I')) return 'KHU I';
+    if (code.startsWith('K23') || code === 'K') return 'KHU K';
+    return `KHU ${code.charAt(0) || 'KHÁC'}`;
+  };
+  const mapBuildingsByArea = safeBuildingsList.reduce<Record<string, Building[]>>((groups, building) => {
+    const area = campusAreaFor(building.building_code);
+    const hasVisibleRoom = mapRooms.some(room => room.building_id === building.id);
+    if (hasVisibleRoom) (groups[area] = groups[area] || []).push(building);
     return groups;
   }, {});
-
   return (
     <div className="space-y-8 pb-20 md:pb-12">
       {/* Top Banner */}
@@ -353,47 +363,49 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
               {mapRooms.length === 0 ? (
                 <p className="p-4 text-center text-xs text-slate-400">Không tìm thấy phòng phù hợp.</p>
               ) : (
-                Object.entries(groupedMapRooms).map(([groupKey, groupRooms]) => {
-                  const [buildingCode, floor] = groupKey.split('|');
-                  return (
-                    <div key={groupKey} className="space-y-1">
-                      <div className="flex items-center justify-between px-2 pt-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                        <span>{buildingCode} · Tầng {floor}</span>
-                        <span>{groupRooms.length}</span>
-                      </div>
-                      {groupRooms.map(room => {
-                        const isSelected = selectedRoom?.id === room.id;
-                        return (
-                          <div
-                            key={room.id}
-                            className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${isSelected ? 'bg-sky-50 ring-1 ring-sky-200' : 'hover:bg-slate-50'}`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleSelectRoom(room)}
-                              className="flex items-center gap-2 min-w-0 flex-1 text-left"
-                            >
-                              <span className="w-7 h-7 shrink-0 rounded-lg bg-sky-600 text-white flex items-center justify-center text-[10px] font-extrabold">
-                                {room.building_code || 'P'}
-                              </span>
-                              <span className="min-w-0">
-                                <span className="block text-xs font-extrabold text-slate-800 truncate">{room.room_number}</span>
-                                <span className="block text-[10px] text-slate-500 truncate">{room.name}</span>
-                              </span>
-                            </button>
-                            <Link
-                              to={`/rooms/${room.id}`}
-                              title={`Xem chi tiết phòng ${room.room_number}`}
-                              className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-white"
-                            >
-                              <ArrowRight className="w-3.5 h-3.5" />
-                            </Link>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })
+                Object.entries(mapBuildingsByArea).map(([area, areaBuildings]) => (
+                  <div key={area} className="space-y-2">
+                    <p className="px-2 pt-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">{area}</p>
+                    {areaBuildings.map(building => {
+                      const buildingRooms = mapRooms.filter(room => room.building_id === building.id);
+                      const isExpanded = expandedBuildingIds.has(building.id) || Boolean(searchTerm);
+                      const roomsByFloor = buildingRooms.reduce<Record<number, Room[]>>((groups, room) => {
+                        (groups[room.floor] = groups[room.floor] || []).push(room);
+                        return groups;
+                      }, {});
+                      return <div key={building.id} className="space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedBuildingIds(previous => {
+                              const next = new Set(previous);
+                              next.has(building.id) ? next.delete(building.id) : next.add(building.id);
+                              return next;
+                            });
+                          }}
+                          className={`w-full flex items-center gap-2 rounded-xl border-2 px-2.5 py-2 text-left transition-colors ${isExpanded ? 'border-slate-900 bg-sky-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                        >
+                          <span className="w-8 h-8 shrink-0 rounded-lg text-white flex items-center justify-center text-[11px] font-black" style={{ backgroundColor: building.color || '#2563eb' }}>{building.building_code}</span>
+                          <span className="min-w-0 flex-1 text-xs font-extrabold text-slate-900 truncate">{building.name}</span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold text-slate-400">{buildingRooms.length}</span>
+                          <ChevronDown className={`w-4 h-4 text-sky-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isExpanded && Object.entries(roomsByFloor).sort(([a], [b]) => Number(a) - Number(b)).map(([floor, floorRooms]) => <div key={`${building.id}-${floor}`}>
+                          <p className="px-3 pt-2 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Tầng {floor}</p>
+                          {floorRooms.map(room => {
+                            const isSelected = selectedRoom?.id === room.id;
+                            return <div key={room.id} className={`flex items-center gap-2 rounded-xl px-3 py-2 transition-colors ${isSelected ? 'bg-sky-50 ring-1 ring-sky-200' : 'hover:bg-slate-50'}`}>
+                              <button type="button" onClick={() => handleSelectRoom(room)} className="min-w-0 flex-1 text-left">
+                                <span className="block text-xs font-extrabold text-slate-800 truncate">{room.room_number} <span className="ml-1 font-medium text-slate-500">{room.name}</span></span>
+                              </button>
+                              <Link to={`/rooms/${room.id}`} title={`Xem chi tiết phòng ${room.room_number}`} className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-white"><ArrowRight className="w-3.5 h-3.5" /></Link>
+                            </div>;
+                          })}
+                        </div>)}
+                      </div>;
+                    })}
+                  </div>
+                ))
               )}
             </div>
 
@@ -420,6 +432,8 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
                 userLocation={userLocation}
                 routeCoordinates={routeCoordinates}
                 isTechnicianMode={isTechnicianMode}
+                showCampusEntities={false}
+                selectedRoom={selectedRoom}
               />
             ) : (
               currentBuilding && (
@@ -437,6 +451,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
               )
             )}
           </div>
+
         </div>
       </section>
 

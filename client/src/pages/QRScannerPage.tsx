@@ -131,14 +131,15 @@ export const QRScannerPage: React.FC = () => {
 
       {/* Scanner Box */}
       <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
-        <div
-          id="reader"
-          className="w-full max-w-sm mx-auto overflow-hidden rounded-2xl bg-slate-900 min-h-[260px] flex items-center justify-center text-white text-xs border border-slate-700"
-        >
+               <div className="relative w-full max-w-sm mx-auto overflow-hidden rounded-2xl bg-slate-900 min-h-[260px] border border-slate-700">
+          <div id="reader" className="w-full min-h-[260px]" />
+
           {!isScanning && (
-            <div className="text-center p-6 space-y-3">
-              <Camera className="w-10 h-10 text-slate-400 mx-auto animate-bounce" />
-              <p className="text-slate-300">Nhấn nút bên dưới để mở Camera quét trực tiếp</p>
+            <div className="absolute inset-0 flex items-center justify-center text-white text-xs pointer-events-none">
+              <div className="text-center p-6 space-y-3">
+                <Camera className="w-10 h-10 text-slate-400 mx-auto animate-bounce" />
+                <p className="text-slate-300">Nhấn nút bên dưới để mở Camera quét trực tiếp</p>
+              </div>
             </div>
           )}
         </div>

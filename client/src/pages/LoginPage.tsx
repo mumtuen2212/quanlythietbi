@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LogIn, 
@@ -14,15 +14,67 @@ import { useAuth } from '../context/AuthContext';
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement>(null);
 
   const from = (location.state as any)?.from?.pathname || '/';
+
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId || !googleButtonRef.current) return;
+
+    const renderGoogleButton = () => {
+      if (!window.google || !googleButtonRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async ({ credential }) => {
+          try {
+            setLoading(true);
+            setError(null);
+            await loginWithGoogle(credential);
+            navigate(from, { replace: true });
+          } catch (err: any) {
+            setError(err.response?.data?.message || 'Không thể đăng nhập bằng Google. Vui lòng thử lại.');
+          } finally {
+            setLoading(false);
+          }
+        }
+      });
+      googleButtonRef.current.replaceChildren();
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'rectangular',
+        width: 360
+      });
+      setGoogleReady(true);
+    };
+
+    const scriptId = 'google-identity-services';
+    const existingScript = document.getElementById(scriptId);
+    if (existingScript) {
+      existingScript.addEventListener('load', renderGoogleButton);
+      renderGoogleButton();
+      return () => existingScript.removeEventListener('load', renderGoogleButton);
+    }
+
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = renderGoogleButton;
+    script.onerror = () => setError('Không thể tải dịch vụ đăng nhập Google.');
+    document.head.appendChild(script);
+  }, [from, loginWithGoogle, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +95,7 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+
   return (
     <div className="max-w-md mx-auto py-8 sm:py-12">
       <div className="bg-white border border-slate-200 rounded-3xl shadow-xl overflow-hidden p-6 sm:p-8">
@@ -51,6 +104,7 @@ export const LoginPage: React.FC = () => {
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-sky-500/25 mb-4">
             <School className="w-8 h-8" />
           </div>
+
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">Đăng Nhập Hệ Thống</h1>
           <p className="text-sm text-slate-500 mt-1">Hệ thống Quản lý Thiết bị & Sơ đồ TDMU Campus</p>
         </div>
@@ -126,6 +180,20 @@ export const LoginPage: React.FC = () => {
           </button>
         </form>
 
+        {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+          <>
+            <div className="flex items-center gap-3 my-6">
+              <div className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs font-medium text-slate-400">hoặc</span>
+              <div className="h-px flex-1 bg-slate-200" />
+            </div>
+            <div className={loading ? 'pointer-events-none opacity-50' : ''}>
+              <div ref={googleButtonRef} className="min-h-10 flex justify-center" />
+              {!googleReady && <p className="mt-2 text-center text-xs text-slate-400">Đang tải đăng nhập Google...</p>}
+            </div>
+          </>
+        )}
+
         {/* Footer Link */}
         <div className="mt-6 text-center text-xs text-slate-500">
           Chưa có tài khoản?{' '}
@@ -134,6 +202,7 @@ export const LoginPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
     </div>
   );
 };
