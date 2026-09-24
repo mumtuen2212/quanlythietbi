@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const config: sql.config = {
-  user: process.env.DB_USER || 'bien',
+  user: process.env.DB_USER || 'sa',
   password: process.env.DB_PASSWORD || '123456',
   server: process.env.DB_HOST || '127.0.0.1',
   port: Number(process.env.DB_PORT || 1434),

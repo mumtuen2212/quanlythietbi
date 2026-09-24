@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 dotenv.config();
 
 const config: sql.config = {
-  user: process.env.DB_USER || 'bien',
+  user: process.env.DB_USER || 'sa',
   password: process.env.DB_PASSWORD || '123456',
   server: process.env.DB_HOST || '127.0.0.1',
   port: parseInt(process.env.DB_PORT || '1434', 10),

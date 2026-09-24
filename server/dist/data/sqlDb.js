@@ -10,7 +10,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const types_1 = require("./types");
 dotenv_1.default.config();
 const config = {
-    user: process.env.DB_USER || 'bien',
+    user: process.env.DB_USER || 'sa',
     password: process.env.DB_PASSWORD || '123456',
     server: process.env.DB_HOST || '127.0.0.1',
     port: parseInt(process.env.DB_PORT || '1434', 10),
