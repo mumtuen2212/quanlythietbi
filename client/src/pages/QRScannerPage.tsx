@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Html5Qrcode } from 'html5-qrcode';
+import { QRCodeSVG } from 'qrcode.react';
 import { 
   QrCode, 
   Camera, 
@@ -8,9 +9,9 @@ import {
   ArrowRight, 
   Sparkles, 
   Building2, 
-  Mic, 
-  Tv, 
-  AlertCircle 
+  AlertCircle,
+  ClipboardList,
+  BookOpen
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 
@@ -20,6 +21,7 @@ export const QRScannerPage: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isHandlingCodeRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -41,8 +43,18 @@ export const QRScannerPage: React.FC = () => {
           qrbox: { width: 250, height: 250 }
         },
         (decodedText) => {
-          handleDetectedCode(decodedText);
-          stopScanner();
+          // Camera có thể nhận cùng một mã ở nhiều khung hình liên tiếp.
+          // Chỉ xử lý lần đầu và tắt camera xong mới chuyển sang trang phòng.
+          if (isHandlingCodeRef.current) return;
+          isHandlingCodeRef.current = true;
+          void (async () => {
+            await stopScanner();
+            try {
+              await handleDetectedCode(decodedText);
+            } finally {
+              isHandlingCodeRef.current = false;
+            }
+          })();
         },
         (errorMessage) => {
           // ignore frame errors
@@ -56,13 +68,21 @@ export const QRScannerPage: React.FC = () => {
   };
 
   const stopScanner = async () => {
-    if (scannerRef.current && isScanning) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current.clear();
-      } catch (err) {
-        console.error('Error stopping scanner:', err);
-      }
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
+
+    if (!scanner) {
+      setIsScanning(false);
+      return;
+    }
+
+    try {
+      await scanner.stop();
+      scanner.clear();
+    } catch (err) {
+      // Nếu camera chưa kịp chạy hoàn toàn thì vẫn phải trả giao diện về trạng thái tắt.
+      console.error('Error stopping scanner:', err);
+    } finally {
       setIsScanning(false);
     }
   };
@@ -82,39 +102,42 @@ export const QRScannerPage: React.FC = () => {
   };
 
   const handleDetectedCode = async (code: string) => {
-    setScanResult(code);
+    const normalizedCode = code.trim();
+    setScanResult(normalizedCode);
 
     try {
-      // Check if it's a room QR
-      if (code.toUpperCase().includes('ROOM')) {
-        const room = await ApiService.getRoomByQr(code);
+      // QR của phòng là luồng chính. Không phụ thuộc vào cách đặt tên mã QR,
+      // nên admin có thể thay đổi mã trong SQL mà vẫn quét được.
+      try {
+        const room = await ApiService.getRoomByQr(normalizedCode);
         if (room) {
-          navigate(`/rooms/${room.id}`);
+          navigate(`/rooms/${room.id}?from=qr`);
           return;
         }
+      } catch {
+        // Không phải mã phòng: tiếp tục hỗ trợ tem QR thiết bị đã in trước đó.
       }
 
-      // Check if it's a device QR
-      if (code.toUpperCase().includes('DEV') || code.toUpperCase().includes('MIC') || code.toUpperCase().includes('PRJ')) {
-        const dev = await ApiService.getDeviceByQr(code);
+      try {
+        const dev = await ApiService.getDeviceByQr(normalizedCode);
         if (dev) {
-          navigate(`/devices/${dev.id}`);
+          navigate(`/devices/${dev.id}?from=qr`);
           return;
         }
+      } catch {
+        // Hiển thị một thông báo chung, dễ hiểu bên dưới.
       }
 
-      setErrorMsg(`Mã QR "${code}" không khớp với phòng học hoặc thiết bị nào trong cơ sở dữ liệu.`);
+      setErrorMsg(`Mã QR "${normalizedCode}" không khớp với phòng hoặc thiết bị nào trong cơ sở dữ liệu.`);
     } catch (err) {
       setErrorMsg('Lỗi khi tra cứu mã QR từ máy chủ.');
     }
   };
 
-  // Sample quick test buttons for demo
+  // Mẫu QR phòng để kiểm tra nhanh khi chưa in tem QR.
   const sampleQRCodes = [
-    { label: 'Phòng A.301 (Bàn GV)', code: 'QR-ROOM-A301', type: 'room', desc: 'Có mic Sisu xanh, máy chiếu, loa' },
-    { label: 'Bộ Mic Sisu Màu Xanh A.301', code: 'QR-DEV-MIC-A301-01', type: 'device', desc: 'Xem cách chỉnh tần số UHF và xử lý hú' },
-    { label: 'Phòng A.302 (Đang Báo Hỏng)', code: 'QR-ROOM-A302', type: 'room', desc: 'Có 1 mic đang chờ sửa chữa' },
-    { label: 'Máy chiếu Panasonic A.301', code: 'QR-DEV-PRJ-A301-01', type: 'device', desc: 'Xem cách cắm HDMI và chỉnh nét Focus' }
+    { label: 'Phòng A.301', code: 'QR-ROOM-A301', desc: 'Xem số lượng và danh sách thiết bị trong phòng' },
+    { label: 'Phòng A.302', code: 'QR-ROOM-A302', desc: 'Chọn thiết bị để xem hướng dẫn hoặc báo hỏng' }
   ];
 
   return (
@@ -125,8 +148,37 @@ export const QRScannerPage: React.FC = () => {
         </div>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Quét Mã QR Tra Cứu Nhanh</h1>
         <p className="text-slate-500 text-sm max-w-md mx-auto">
-          Quét tem QR dán trên bàn giảng viên hoặc thân thiết bị để xem hướng dẫn sử dụng và gửi báo hỏng 1-chạm.
+          Quét mã QR của phòng để xem thông tin phòng, danh sách thiết bị và báo hỏng đúng thiết bị.
         </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[
+          { icon: Building2, text: 'Thông tin phòng', detail: 'Tòa, tầng và trạng thái phòng' },
+          { icon: ClipboardList, text: 'Danh sách thiết bị', detail: 'Số lượng và thiết bị đang có' },
+          { icon: BookOpen, text: 'Hướng dẫn & báo hỏng', detail: 'Chọn từng thiết bị để thực hiện' }
+        ].map(({ icon: Icon, text, detail }) => (
+          <div key={text} className="bg-sky-50/70 rounded-2xl border border-sky-100 p-4 flex items-start gap-3">
+            <Icon className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-slate-800">{text}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-center gap-5">
+        <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100 shrink-0">
+          <QRCodeSVG value="QR-ROOM-A1-101" size={128} bgColor="#f8fafc" fgColor="#075985" level="H" />
+        </div>
+        <div className="text-center sm:text-left space-y-2">
+          <p className="text-sm font-extrabold text-slate-900">QR phòng thử nghiệm: A1-101</p>
+          <p className="text-xs text-slate-500 max-w-md">
+            Sau khi chạy dữ liệu mẫu, hãy dùng điện thoại quét mã này hoặc chụp màn hình rồi chọn “Tải ảnh QR từ máy”.
+          </p>
+          <code className="inline-block px-2 py-1 rounded bg-slate-100 text-xs font-bold text-sky-800">QR-ROOM-A1-101</code>
+        </div>
       </div>
 
       {/* Scanner Box */}
@@ -185,7 +237,7 @@ export const QRScannerPage: React.FC = () => {
           <h2 className="text-lg font-bold">Thử nghiệm nhanh (Demo Simulation)</h2>
         </div>
         <p className="text-xs text-slate-300">
-          Nếu chưa in tem QR ra giấy, bạn có thể bấm trực tiếp các mẫu tem dán thực tế dưới đây để kiểm tra hệ thống điều hướng:
+          Nếu chưa in tem QR ra giấy, bạn có thể bấm mẫu QR phòng dưới đây để kiểm tra luồng xem thiết bị:
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
@@ -197,11 +249,7 @@ export const QRScannerPage: React.FC = () => {
             >
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  {item.type === 'room' ? (
-                    <Building2 className="w-4 h-4 text-sky-400" />
-                  ) : (
-                    <Mic className="w-4 h-4 text-indigo-400" />
-                  )}
+                  <Building2 className="w-4 h-4 text-sky-400" />
                   <span className="font-bold text-sm text-white group-hover:text-sky-300">{item.label}</span>
                 </div>
                 <p className="text-[11px] text-slate-300 font-mono">{item.code}</p>

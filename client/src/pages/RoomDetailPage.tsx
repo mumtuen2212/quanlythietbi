@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Building2, 
   QrCode, 
@@ -21,6 +21,7 @@ import { StatusBadge } from '../components/StatusBadge';
 export const RoomDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [room, setRoom] = useState<Room | null>(null);
   const [reports, setReports] = useState<IncidentReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,12 +64,14 @@ export const RoomDetailPage: React.FC = () => {
     );
   }
 
+  const wasOpenedFromQr = searchParams.get('from') === 'qr';
+
   return (
     <div className="space-y-8 pb-20 md:pb-12">
       {/* Top Breadcrumb & Actions */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => wasOpenedFromQr ? navigate('/qr-scanner') : navigate(-1)}
           className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 bg-white px-3.5 py-2 rounded-xl border border-slate-200 shadow-sm transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -96,6 +99,15 @@ export const RoomDetailPage: React.FC = () => {
 
       {/* Room Header Card */}
       <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm">
+        {wasOpenedFromQr && (
+          <div className="mb-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 flex items-start gap-3">
+            <QrCode className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-sky-900">Đã mở từ mã QR của phòng</p>
+              <p className="text-xs text-sky-700 mt-0.5">Chọn một thiết bị bên dưới để xem hướng dẫn sử dụng hoặc gửi báo hỏng.</p>
+            </div>
+          </div>
+        )}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-3">
