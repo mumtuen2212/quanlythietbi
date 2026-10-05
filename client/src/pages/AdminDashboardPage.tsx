@@ -25,7 +25,7 @@ import {
   X,
   Search
 } from 'lucide-react';
-import { ApiService } from '../services/api';
+import { ApiService, getAssetUrl } from '../services/api';
 import { 
   IncidentReport, 
   Device, 
@@ -880,7 +880,7 @@ export const AdminDashboardPage: React.FC = () => {
                               title="Bấm để xem ảnh lớn"
                             >
                               <img
-                                src={imageUrl}
+                                src={getAssetUrl(imageUrl)}
                                 alt={`Ảnh sự cố ${index + 1} của ${report.report_code}`}
                                 className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
                               />
@@ -1853,7 +1853,7 @@ export const AdminDashboardPage: React.FC = () => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4" onClick={() => setSelectedReportImage(null)}>
           <div className="relative max-h-full max-w-5xl" onClick={event => event.stopPropagation()}>
             <button type="button" onClick={() => setSelectedReportImage(null)} className="absolute -right-2 -top-2 z-10 rounded-full bg-white p-2 text-slate-700 shadow-lg hover:bg-slate-100" title="Đóng ảnh"><X className="h-5 w-5" /></button>
-            <img src={selectedReportImage.url} alt={`Ảnh minh chứng ${selectedReportImage.reportCode}`} className="max-h-[85vh] max-w-full rounded-2xl bg-white object-contain shadow-2xl" />
+            <img src={getAssetUrl(selectedReportImage.url)} alt={`Ảnh minh chứng ${selectedReportImage.reportCode}`} className="max-h-[85vh] max-w-full rounded-2xl bg-white object-contain shadow-2xl" />
             <p className="mt-2 text-center text-xs font-bold text-white">Ảnh minh chứng — {selectedReportImage.reportCode}</p>
           </div>
         </div>

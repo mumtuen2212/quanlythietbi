@@ -23,17 +23,17 @@ export const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [googleReady, setGoogleReady] = useState(false);
   const googleButtonRef = useRef<HTMLDivElement>(null);
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   const from = (location.state as any)?.from?.pathname || '/';
 
   useEffect(() => {
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (!clientId || !googleButtonRef.current) return;
+    if (!googleClientId || !googleButtonRef.current) return;
 
     const renderGoogleButton = () => {
       if (!window.google || !googleButtonRef.current) return;
       window.google.accounts.id.initialize({
-        client_id: clientId,
+        client_id: googleClientId,
         callback: async ({ credential }) => {
           try {
             setLoading(true);
@@ -74,7 +74,7 @@ export const LoginPage: React.FC = () => {
     script.onload = renderGoogleButton;
     script.onerror = () => setError('Không thể tải dịch vụ đăng nhập Google.');
     document.head.appendChild(script);
-  }, [from, loginWithGoogle, navigate]);
+  }, [from, googleClientId, loginWithGoogle, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,7 +180,7 @@ export const LoginPage: React.FC = () => {
           </button>
         </form>
 
-        {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+        {googleClientId ? (
           <>
             <div className="flex items-center gap-3 my-6">
               <div className="h-px flex-1 bg-slate-200" />
@@ -192,6 +192,10 @@ export const LoginPage: React.FC = () => {
               {!googleReady && <p className="mt-2 text-center text-xs text-slate-400">Đang tải đăng nhập Google...</p>}
             </div>
           </>
+        ) : (
+          <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-800">
+            Đăng nhập Google chưa được cấu hình cho ứng dụng này.
+          </p>
         )}
 
         {/* Footer Link */}

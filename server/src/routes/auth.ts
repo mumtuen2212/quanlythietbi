@@ -1,12 +1,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { Database } from '../data/db';
-import { SqlDatabase } from '../data/sqlDb';
-import { User, Permission, RoleName, ALL_PERMISSIONS } from '../data/types';
+import { PostgresDatabase } from '../data/postgresDb';
+import { User, Permission, RoleName } from '../data/types';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'tdmu-equipment-management-jwt-secret-2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET must be configured in the Render environment.');
+}
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Extend Express Request to include user
@@ -25,15 +27,7 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as { id: number; username: string };
-    let user: User | null = null;
-    try {
-      user = await SqlDatabase.getUserById(decoded.id);
-    } catch {
-      user = Database.getUserById(decoded.id);
-    }
-    if (!user) {
-      user = Database.getUserById(decoded.id);
-    }
+    const user = await PostgresDatabase.getUserById(decoded.id);
 
     if (!user) {
       return res.status(401).json({ success: false, message: 'Tài khoản không tồn tại hoặc phiên đã hết hạn' });
@@ -41,6 +35,9 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
     req.user = user;
     next();
   } catch (err) {
+    if (err instanceof Error && !(err instanceof jwt.JsonWebTokenError) && !(err instanceof jwt.TokenExpiredError)) {
+      return res.status(503).json({ success: false, message: 'Không thể xác thực tài khoản do lỗi cơ sở dữ liệu' });
+    }
     return res.status(403).json({ success: false, message: 'Token không hợp lệ hoặc đã hết hạn' });
   }
 };
@@ -53,20 +50,14 @@ export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFu
   if (token) {
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as { id: number; username: string };
-      let user: User | null = null;
-      try {
-        user = await SqlDatabase.getUserById(decoded.id);
-      } catch {
-        user = Database.getUserById(decoded.id);
-      }
-      if (!user) {
-        user = Database.getUserById(decoded.id);
-      }
+      const user = await PostgresDatabase.getUserById(decoded.id);
       if (user) {
         req.user = user;
       }
-    } catch {
-      // Ignore invalid token for optional auth
+    } catch (error) {
+      if (!(error instanceof jwt.JsonWebTokenError) && !(error instanceof jwt.TokenExpiredError)) {
+        return next(error);
+      }
     }
   }
   next();
@@ -130,22 +121,12 @@ router.post('/register', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Mật khẩu phải có ít nhất 6 ký tự' });
     }
 
-    let existingUser = null;
-    try {
-      existingUser = await SqlDatabase.getUserByUsername(username);
-    } catch {
-      existingUser = Database.getUserByUsername(username);
-    }
+    const existingUser = await PostgresDatabase.getUserByUsername(username);
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'Tên đăng nhập đã tồn tại trong hệ thống' });
     }
 
-    let existingEmailUser = null;
-    try {
-      existingEmailUser = await SqlDatabase.getUserByEmail(email);
-    } catch {
-      existingEmailUser = Database.getUserByEmail(email);
-    }
+    const existingEmailUser = await PostgresDatabase.getUserByEmail(email);
     if (existingEmailUser) {
       return res.status(400).json({ success: false, message: 'Email này đã được đăng ký' });
     }
@@ -157,37 +138,15 @@ router.post('/register', async (req: Request, res: Response) => {
       ? role_name
       : 'STUDENT';
 
-    let newUser: User | null = null;
-    try {
-      newUser = await SqlDatabase.createUser({
-        username,
-        password_hash,
-        full_name,
-        email,
-        phone: phone || '',
-        role_name: role
-      });
-    } catch {
-      newUser = Database.createUser({
-        username,
-        password_hash,
-        full_name,
-        email,
-        phone: phone || '',
-        role_name: role
-      });
-    }
-
-    if (!newUser) {
-      newUser = Database.createUser({
-        username,
-        password_hash,
-        full_name,
-        email,
-        phone: phone || '',
-        role_name: role
-      });
-    }
+    const newUser = await PostgresDatabase.createUser({
+      username,
+      password_hash,
+      full_name,
+      email,
+      phone: phone || '',
+      role_name: role
+    });
+    if (!newUser) throw new Error('PostgreSQL did not return the newly created account.');
 
     const token = jwt.sign(
       { id: newUser.id, username: newUser.username, role: newUser.role_name },
@@ -224,27 +183,26 @@ router.post('/login', async (req: Request, res: Response) => {
 
     let user: User | null = null;
     try {
-      user = (await SqlDatabase.getUserByUsername(username)) || (await SqlDatabase.getUserByEmail(username));
+      user = (await PostgresDatabase.getUserByUsername(username)) || (await PostgresDatabase.getUserByEmail(username));
     } catch (e) {
-      console.warn('SQL login lookup fallback:', e);
+      console.error('PostgreSQL login lookup failed:', e);
+      return res.status(503).json({ success: false, message: 'Không thể kết nối cơ sở dữ liệu. Vui lòng thử lại.' });
     }
 
     if (!user) {
-      user = Database.getUserByUsername(username) || Database.getUserByEmail(username);
-    }
-
-    if (!user || !user.password_hash) {
       return res.status(401).json({
         success: false,
-        message: 'Tên đăng nhập hoặc mật khẩu không chính xác'
+        message: 'Tên đăng nhập hoặc email không chính xác'
       });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+    const isMatch = user.password_hash
+      ? await bcrypt.compare(password, user.password_hash)
+      : false;
     if (!isMatch) {
       return res.status(401).json({
         success: false,
-        message: 'Tên đăng nhập hoặc mật khẩu không chính xác'
+        message: 'Mật khẩu không chính xác'
       });
     }
 
@@ -275,9 +233,9 @@ router.post('/change-password', authenticateToken, async (req: AuthRequest, res:
   if (new_password.length < 6) return res.status(400).json({ success: false, message: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
   if (new_password !== confirm_password) return res.status(400).json({ success: false, message: 'Hai lần nhập mật khẩu mới không trùng nhau' });
   try {
-    const user = await SqlDatabase.getUserById(req.user!.id);
+    const user = await PostgresDatabase.getUserById(req.user!.id);
     if (!user?.password_hash || !await bcrypt.compare(current_password, user.password_hash)) return res.status(400).json({ success: false, message: 'Mật khẩu hiện tại không đúng' });
-    const changed = await SqlDatabase.updateOwnPassword(user.id, await bcrypt.hash(new_password, 12));
+    const changed = await PostgresDatabase.updateOwnPassword(user.id, await bcrypt.hash(new_password, 12));
     if (!changed) return res.status(500).json({ success: false, message: 'Không thể đổi mật khẩu' });
     return res.json({ success: true, message: 'Đổi mật khẩu thành công' });
   } catch (error: any) { return res.status(500).json({ success: false, message: error.message || 'Không thể đổi mật khẩu' }); }
@@ -324,11 +282,11 @@ router.post('/google', async (req: Request, res: Response) => {
 
     let user: User | null = null;
     try {
-      user = await SqlDatabase.getUserByEmail(claims.email);
+      user = await PostgresDatabase.getUserByEmail(claims.email);
     } catch (error) {
-      console.warn('SQL Google login lookup fallback:', error);
+      console.error('PostgreSQL Google login lookup failed:', error);
+      return res.status(503).json({ success: false, message: 'Không thể kết nối cơ sở dữ liệu. Vui lòng thử lại.' });
     }
-    if (!user) user = Database.getUserByEmail(claims.email);
 
     if (!user) {
       const payload = {
@@ -339,12 +297,8 @@ router.post('/google', async (req: Request, res: Response) => {
         phone: '',
         role_name: 'STUDENT' as RoleName
       };
-      try {
-        user = await SqlDatabase.createUser(payload);
-      } catch (error) {
-        console.warn('SQL Google user creation fallback:', error);
-      }
-      if (!user) user = Database.createUser(payload);
+      user = await PostgresDatabase.createUser(payload);
+      if (!user) throw new Error('PostgreSQL did not return the Google account.');
     }
 
     const token = jwt.sign(
@@ -381,11 +335,11 @@ router.get('/me', authenticateToken, (req: AuthRequest, res: Response) => {
 // List Users for RBAC Management
 router.get('/users', authenticateToken, requirePermission('GRANT_PERMISSIONS'), async (req: AuthRequest, res: Response) => {
   try {
-    const users = await SqlDatabase.getUsers();
+    const users = await PostgresDatabase.getUsers();
     res.json({ success: true, data: users });
   } catch (err) {
-    const users = Database.getUsers();
-    res.json({ success: true, data: users });
+    console.error('PostgreSQL user listing failed:', err);
+    res.status(503).json({ success: false, message: 'Không thể tải danh sách tài khoản' });
   }
 });
 
@@ -409,26 +363,15 @@ router.post('/users', authenticateToken, requirePermission('GRANT_PERMISSIONS'),
     }
 
     const password_hash = await bcrypt.hash(password, 10);
-    let newUser: User | null = null;
-    try {
-      newUser = await SqlDatabase.createUser({
-        username,
-        password_hash,
-        full_name,
-        email,
-        phone,
-        role_name
-      });
-    } catch {
-      newUser = Database.createUser({
-        username,
-        password_hash,
-        full_name,
-        email,
-        phone,
-        role_name
-      });
-    }
+    const newUser = await PostgresDatabase.createUser({
+      username,
+      password_hash,
+      full_name,
+      email,
+      phone,
+      role_name
+    });
+    if (!newUser) throw new Error('PostgreSQL did not return the new account.');
 
     const { password_hash: _, ...safeUser } = newUser!;
     return res.status(201).json({ success: true, message: 'Tạo tài khoản thành công', data: safeUser });
@@ -446,11 +389,11 @@ router.delete('/users/:id', authenticateToken, requirePermission('GRANT_PERMISSI
   if (req.user?.id === userId) return res.status(400).json({ success: false, message: 'Không thể tự xóa tài khoản đang đăng nhập' });
 
   try {
-    const deleted = await SqlDatabase.deleteUser(userId);
+    const deleted = await PostgresDatabase.deleteUser(userId);
     if (!deleted) return res.status(404).json({ success: false, message: 'Tài khoản không tồn tại hoặc là tài khoản hệ thống' });
     return res.json({ success: true, message: 'Đã xóa tài khoản' });
   } catch (error: any) {
-    console.error(`[DELETE /auth/users/${userId}] Xóa trong SQL Server thất bại:`, error);
+    console.error(`[DELETE /auth/users/${userId}] PostgreSQL deletion failed:`, error);
     return res.status(500).json({ success: false, message: 'Không thể xóa tài khoản trong cơ sở dữ liệu chính' });
   }
 });
@@ -465,18 +408,7 @@ router.patch('/users/:id/permissions', authenticateToken, requirePermission('GRA
       return res.status(403).json({ success: false, message: 'Chỉ Admin mới được cấp vai trò Admin' });
     }
 
-    let updated: User | null = null;
-    if (role_name) {
-      try {
-        updated = await SqlDatabase.updateUserRole(userId, role_name);
-      } catch {
-        updated = Database.updateUserRole(userId, role_name);
-      }
-    }
-
-    if (!updated) {
-      updated = Database.getUserById(userId);
-    }
+    const updated = role_name ? await PostgresDatabase.updateUserRole(userId, role_name) : null;
 
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });

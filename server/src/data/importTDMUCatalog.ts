@@ -1,20 +1,7 @@
 /**
- * One-time SQL import for the TDMU campus catalogue supplied by the project owner.
- * It replaces only the sample campus catalogue and records all map positions in SQL.
+ * Idempotently imports the TDMU campus catalogue into Neon PostgreSQL.
  */
-import sql from 'mssql';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-const config: sql.config = {
-  user: process.env.DB_USER || 'sa',
-  password: process.env.DB_PASSWORD || '123456',
-  server: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 1434),
-  database: process.env.DB_NAME || 'quanlythietbi',
-  options: { encrypt: false, trustServerCertificate: true, enableArithAbort: true }
-};
+import { PostgresDatabase } from './postgresDb';
 
 type BuildingSeed = { code: string; name: string; floors: number; latitude: number; longitude: number; color: string };
 type RoomSeed = { building: string; code: string; name: string; floor: number };
@@ -69,39 +56,52 @@ const specialPoints = [
 
 async function run() {
   if (rooms.length !== 237) throw new Error(`Danh mục phải có 237 phòng, hiện có ${rooms.length}.`);
-  const pool = await sql.connect(config);
-  const transaction = new sql.Transaction(pool);
-  await transaction.begin();
-  try {
-    const request = new sql.Request(transaction);
-    await request.query(`
-      IF COL_LENGTH('dbo.ToaNha', 'Latitude') IS NULL ALTER TABLE dbo.ToaNha ADD Latitude DECIMAL(10,7) NULL;
-      IF COL_LENGTH('dbo.ToaNha', 'Longitude') IS NULL ALTER TABLE dbo.ToaNha ADD Longitude DECIMAL(10,7) NULL;
-      IF COL_LENGTH('dbo.PhongHoc', 'Latitude') IS NULL ALTER TABLE dbo.PhongHoc ADD Latitude DECIMAL(10,7) NULL;
-      IF COL_LENGTH('dbo.PhongHoc', 'Longitude') IS NULL ALTER TABLE dbo.PhongHoc ADD Longitude DECIMAL(10,7) NULL;
-      IF COL_LENGTH('dbo.DiemNoiBat', 'Latitude') IS NULL ALTER TABLE dbo.DiemNoiBat ADD Latitude DECIMAL(10,7) NULL;
-      IF COL_LENGTH('dbo.DiemNoiBat', 'Longitude') IS NULL ALTER TABLE dbo.DiemNoiBat ADD Longitude DECIMAL(10,7) NULL;
-      DELETE FROM dbo.LogBaoTri; DELETE FROM dbo.BaoHong; DELETE FROM dbo.HuongDanSuDung;
-      DELETE FROM dbo.ThietBi; DELETE FROM dbo.PhongHoc; DELETE FROM dbo.ToaNha; DELETE FROM dbo.DiemNoiBat;
-    `);
-    for (const table of ['PhongHoc','ToaNha','DiemNoiBat']) await request.query(`DBCC CHECKIDENT ('dbo.${table}', RESEED, 0)`);
+  await PostgresDatabase.transaction(async client => {
+    const existing = await client.query('SELECT COUNT(*)::int AS count FROM "ToaNha"');
+    if (existing.rows[0].count > 0) {
+      throw new Error('Neon đã có dữ liệu tòa nhà; import bị dừng để tránh xóa dữ liệu đang dùng.');
+    }
+
     const buildingIds = new Map<string, number>();
     for (const building of buildings) {
-      const result = await new sql.Request(transaction).input('code', sql.NVarChar, building.code).input('name', sql.NVarChar, building.name).input('floors', sql.Int, building.floors).input('latitude', sql.Decimal(10,7), building.latitude).input('longitude', sql.Decimal(10,7), building.longitude).input('color', sql.NVarChar, building.color).query(`INSERT dbo.ToaNha (MaToaNha,TenToaNha,MoTa,X,Y,ChieuRong,ChieuCao,SoTang,MauSac,XiengVaoX,XiengVaoY,Latitude,Longitude,NgayTao) OUTPUT INSERTED.ToaNhaID AS id VALUES (@code,@name,N'Danh mục khuôn viên TDMU',500,350,200,140,@floors,@color,500,350,@latitude,@longitude,GETDATE())`);
-      buildingIds.set(building.code, result.recordset[0].id);
+      const result = await client.query(`
+        INSERT INTO "ToaNha" (
+          "MaToaNha", "TenToaNha", "MoTa", "X", "Y", "ChieuRong", "ChieuCao", "SoTang",
+          "MauSac", "XiengVaoX", "XiengVaoY", "Latitude", "Longitude"
+        )
+        VALUES ($1, $2, 'Danh mục khuôn viên TDMU', 500, 350, 200, 140, $3, $4, 500, 350, $5, $6)
+        RETURNING "ToaNhaID"
+      `, [building.code, building.name, building.floors, building.color, building.latitude, building.longitude]);
+      buildingIds.set(building.code, result.rows[0].ToaNhaID);
     }
+
     const indices = new Map<string, number>();
     for (const room of rooms) {
       const building = buildings.find(item => item.code === room.building)!;
-      const indexKey = `${room.building}-${room.floor}`; const index = indices.get(indexKey) || 0; indices.set(indexKey, index + 1);
+      const indexKey = `${room.building}-${room.floor}`;
+      const index = indices.get(indexKey) || 0;
+      indices.set(indexKey, index + 1);
       const latitude = building.latitude + ((index % 5) - 2) * 0.000018 + (room.floor - 1) * 0.000003;
       const longitude = building.longitude + (Math.floor(index / 5) - 1) * 0.000020;
-      await new sql.Request(transaction).input('buildingId',sql.Int,buildingIds.get(room.building)).input('code',sql.NVarChar,room.code).input('name',sql.NVarChar,room.name).input('floor',sql.Int,room.floor).input('latitude',sql.Decimal(10,7),latitude).input('longitude',sql.Decimal(10,7),longitude).query(`INSERT dbo.PhongHoc (ToaNhaID,SoPhong,TenPhong,Tang,MaQR,TrangThai,MoTa,LoaiPhong,X,Y,ChieuRong,ChieuCao,CuaX,CuaY,Latitude,Longitude,NgayTao) VALUES (@buildingId,@code,@name,@floor,CONCAT(N'QR-ROOM-',@code),N'ACTIVE',N'Danh mục phòng TDMU',N'CLASSROOM',0,0,180,120,50,50,@latitude,@longitude,GETDATE())`);
+      await client.query(`
+        INSERT INTO "PhongHoc" (
+          "ToaNhaID", "SoPhong", "TenPhong", "Tang", "MaQR", "TrangThai", "MoTa", "LoaiPhong",
+          "X", "Y", "ChieuRong", "ChieuCao", "CuaX", "CuaY", "Latitude", "Longitude"
+        ) VALUES ($1, $2, $3, $4, 'QR-ROOM-' || $2, 'ACTIVE', 'Danh mục phòng TDMU',
+          'CLASSROOM', 0, 0, 180, 120, 50, 50, $5, $6)
+      `, [buildingIds.get(room.building), room.code, room.name, room.floor, latitude, longitude]);
     }
-    for (const [code,name,category,latitude,longitude] of specialPoints) await new sql.Request(transaction).input('code',sql.NVarChar,code).input('name',sql.NVarChar,name).input('category',sql.NVarChar,category).input('latitude',sql.Decimal(10,7),latitude).input('longitude',sql.Decimal(10,7),longitude).query(`INSERT dbo.DiemNoiBat (MaDiem,TenDiem,LoaiDiem,MoTa,X,Y,Latitude,Longitude,NgayTao) VALUES (@code,@name,@category,N'Điểm đặc biệt khuôn viên',0,0,@latitude,@longitude,GETDATE())`);
-    await transaction.commit();
-    console.log(`Đã đồng bộ ${buildings.length} tòa/dãy, ${rooms.length} phòng và ${specialPoints.length} điểm đặc biệt vào SQL.`);
-  } catch (error) { await transaction.rollback().catch(() => undefined); throw error; }
-  finally { await pool.close(); }
+
+    for (const [code, name, category, latitude, longitude] of specialPoints) {
+      await client.query(`
+        INSERT INTO "DiemNoiBat" ("MaDiem", "TenDiem", "LoaiDiem", "MoTa", "X", "Y", "Latitude", "Longitude")
+        VALUES ($1, $2, $3, 'Điểm đặc biệt khuôn viên', 0, 0, $4, $5)
+      `, [code, name, category, latitude, longitude]);
+    }
+  });
+  console.log(`Đã nhập ${buildings.length} tòa/dãy, ${rooms.length} phòng và ${specialPoints.length} điểm vào Neon.`);
 }
-run().catch(error => { console.error(error); process.exitCode = 1; });
+run().catch(error => {
+  console.error('Không thể nhập danh mục khuôn viên vào Neon:', error);
+  process.exitCode = 1;
+});

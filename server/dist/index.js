@@ -5,10 +5,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
-const path_1 = __importDefault(require("path"));
-const multer_1 = __importDefault(require("multer"));
 const api_1 = __importDefault(require("./routes/api"));
 const auth_1 = __importDefault(require("./routes/auth"));
+const postgresDb_1 = require("./data/postgresDb");
+const uploads_1 = require("./uploads");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
 // Middleware
@@ -20,32 +20,30 @@ app.use((0, cors_1.default)({
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
 // Serve static uploads
-app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
+app.use('/uploads', express_1.default.static(uploads_1.uploadsDirectory));
 // Mount API routes
 app.use('/api/auth', auth_1.default);
 app.use('/api', api_1.default);
-// Trả về thông báo rõ ràng cho biểu mẫu báo hỏng khi ảnh không hợp lệ/quá lớn.
-app.use((error, req, res, next) => {
-    if (error instanceof multer_1.default.MulterError) {
-        const message = error.code === 'LIMIT_FILE_SIZE'
-            ? 'Mỗi ảnh tối đa 10 MB.'
-            : error.code === 'LIMIT_UNEXPECTED_FILE'
-                ? 'Bạn chỉ có thể gửi tối đa 5 ảnh.'
-                : 'Không thể tải ảnh lên. Vui lòng thử lại.';
-        return res.status(400).json({ success: false, message });
-    }
-    if (error) {
-        return res.status(400).json({ success: false, message: error.message || 'Không thể tải ảnh lên.' });
-    }
-    next();
-});
 // Health check
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'online',
-        system: 'School Equipment Management API',
-        time: new Date().toISOString()
-    });
+app.get('/api/health', async (_req, res) => {
+    try {
+        await postgresDb_1.PostgresDatabase.query('SELECT 1 AS connected');
+        res.json({
+            status: 'online',
+            database: 'connected',
+            system: 'School Equipment Management API',
+            time: new Date().toISOString()
+        });
+    }
+    catch (error) {
+        console.error('PostgreSQL health check failed:', error);
+        res.status(503).json({
+            status: 'unavailable',
+            database: 'disconnected',
+            system: 'School Equipment Management API',
+            time: new Date().toISOString()
+        });
+    }
 });
 // Start server
 app.listen(PORT, () => {

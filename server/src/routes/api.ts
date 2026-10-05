@@ -1,24 +1,16 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import QRCode from 'qrcode';
-import { Database } from '../data/db';
-import { SqlDatabase } from '../data/sqlDb';
+import { PostgresDatabase } from '../data/postgresDb';
 import { authenticateToken, requirePermission, requireRole, optionalAuth, AuthRequest } from './auth';
+import { uploadsDirectory } from '../uploads';
 
 const router = Router();
 
 // Multer configuration for file uploads
-// Thư mục không có sẵn trong bản source mới thì Multer sẽ lỗi ngay khi có ảnh.
-// Tạo nó khi server khởi động để ảnh chụp và ảnh tải từ máy đều lưu được.
-const uploadsDirectory = path.join(__dirname, '../../uploads');
-fs.mkdirSync(uploadsDirectory, { recursive: true });
-
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDirectory);
-  },
+  destination: (_req, _file, cb) => cb(null, uploadsDirectory),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
@@ -28,22 +20,16 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) {
-      return cb(new Error('Chỉ có thể gửi tệp hình ảnh.'));
-    }
-    cb(null, true);
-  }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
 // ================= DASHBOARD & STATS =================
 router.get('/stats', async (req: Request, res: Response) => {
   try {
-    const stats = await SqlDatabase.getDashboardStats();
+    const stats = await PostgresDatabase.getDashboardStats();
     res.json({ success: true, data: stats });
   } catch (error) {
-    console.error('Không thể tải thống kê từ SQL Server:', error);
+    console.error('Không thể tải thống kê từ PostgreSQL:', error);
     res.status(503).json({ success: false, message: 'Không thể tải thống kê. Vui lòng thử lại sau.' });
   }
 });
@@ -51,20 +37,20 @@ router.get('/stats', async (req: Request, res: Response) => {
 // ================= BUILDINGS & ROOMS =================
 router.get('/pois', async (req: Request, res: Response) => {
   try {
-    const pois = await SqlDatabase.getPois();
+    const pois = await PostgresDatabase.getPois();
     res.json({ success: true, data: pois });
   } catch (error) {
-    console.error('Không thể tải điểm trên bản đồ từ SQL Server:', error);
+    console.error('Không thể tải điểm trên bản đồ từ PostgreSQL:', error);
     res.status(503).json({ success: false, message: 'Không thể tải điểm trên bản đồ. Vui lòng thử lại sau.' });
   }
 });
 
 router.get('/buildings', async (req: Request, res: Response) => {
   try {
-    const buildings = await SqlDatabase.getBuildings();
+    const buildings = await PostgresDatabase.getBuildings();
     res.json({ success: true, data: buildings });
   } catch (error) {
-    console.error('Không thể tải danh sách tòa nhà từ SQL Server:', error);
+    console.error('Không thể tải danh sách tòa nhà từ PostgreSQL:', error);
     res.status(503).json({ success: false, message: 'Không thể tải danh sách tòa nhà. Vui lòng thử lại sau.' });
   }
 });
@@ -75,7 +61,7 @@ router.post('/buildings', authenticateToken, requireRole(['ADMIN']), async (req:
     if (!String(building_code || '').trim() || !String(name || '').trim()) {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập mã và tên tòa nhà' });
     }
-    const building = await SqlDatabase.addBuilding({
+    const building = await PostgresDatabase.addBuilding({
       building_code: String(building_code).trim().toUpperCase(),
       name: String(name).trim(),
       description: String(description || ''),
@@ -106,7 +92,7 @@ router.patch('/buildings/:id', authenticateToken, requireRole(['ADMIN']), async 
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: 'Mã tòa không hợp lệ' });
   try {
-    const building = await SqlDatabase.updateBuilding(id, req.body);
+    const building = await PostgresDatabase.updateBuilding(id, req.body);
     if (!building) return res.status(404).json({ success: false, message: 'Tòa/dãy không tồn tại' });
     return res.json({ success: true, data: building });
   } catch (error: any) { return res.status(500).json({ success: false, message: error.message || 'Không thể cập nhật tòa/dãy' }); }
@@ -116,7 +102,7 @@ router.delete('/buildings/:id', authenticateToken, requireRole(['ADMIN']), async
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: 'Mã tòa không hợp lệ' });
   try {
-    const deleted = await SqlDatabase.deleteBuilding(id);
+    const deleted = await PostgresDatabase.deleteBuilding(id);
     if (!deleted) return res.status(404).json({ success: false, message: 'Tòa/dãy không tồn tại' });
     return res.json({ success: true, message: 'Đã xóa tòa/dãy và các phòng thuộc tòa' });
   } catch (error: any) { return res.status(500).json({ success: false, message: error.message || 'Không thể xóa tòa/dãy' }); }
@@ -126,13 +112,10 @@ router.get('/rooms', async (req: Request, res: Response) => {
   try {
     const buildingId = req.query.building_id ? parseInt(req.query.building_id as string) : undefined;
     const floor = req.query.floor ? parseInt(req.query.floor as string) : undefined;
-    const rooms = await SqlDatabase.getRooms(buildingId, floor);
+    const rooms = await PostgresDatabase.getRooms(buildingId, floor);
     res.json({ success: true, data: rooms });
   } catch (error) {
-    // The JSON fallback can be stale after a create, update, or delete. Never
-    // return it for rooms, otherwise the UI can show a room that no longer
-    // exists in SQL Server.
-    console.error('Không thể tải danh sách phòng từ SQL Server:', error);
+    console.error('Không thể tải danh sách phòng từ PostgreSQL:', error);
     res.status(503).json({ success: false, message: 'Không thể tải danh sách phòng. Vui lòng thử lại sau.' });
   }
 });
@@ -140,24 +123,24 @@ router.get('/rooms', async (req: Request, res: Response) => {
 router.get('/rooms/:id', async (req: Request, res: Response) => {
   try {
     const roomId = parseInt(req.params.id);
-    const room = await SqlDatabase.getRoomById(roomId);
+    const room = await PostgresDatabase.getRoomById(roomId);
     if (!room) {
       return res.status(404).json({ success: false, message: 'Phòng học không tồn tại' });
     }
     res.json({ success: true, data: room });
   } catch (error) {
-    console.error(`Không thể tải phòng ${req.params.id} từ SQL Server:`, error);
+    console.error(`Không thể tải phòng ${req.params.id} từ PostgreSQL:`, error);
     res.status(503).json({ success: false, message: 'Không thể tải thông tin phòng. Vui lòng thử lại sau.' });
   }
 });
 
 router.get('/rooms/qr/:qrCode', async (req: Request, res: Response) => {
   try {
-    const room = await SqlDatabase.getRoomByQr(req.params.qrCode);
+    const room = await PostgresDatabase.getRoomByQr(req.params.qrCode);
     if (!room) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy phòng tương ứng với mã QR' });
     }
-    const detailedRoom = await SqlDatabase.getRoomById(room.id);
+    const detailedRoom = await PostgresDatabase.getRoomById(room.id);
     res.json({ success: true, data: detailedRoom });
   } catch (error) {
     console.error(`Không thể tải phòng từ mã QR ${req.params.qrCode}:`, error);
@@ -165,10 +148,10 @@ router.get('/rooms/qr/:qrCode', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/rooms', authenticateToken, requirePermission('MANAGE_ROOMS'), async (req: Request, res: Response) => {
+router.post('/rooms', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
-    const newRoom = await SqlDatabase.addRoom({
+    const newRoom = await PostgresDatabase.addRoom({
       building_id: parseInt(building_id),
       room_number: room_number || '',
       name: name || room_number || 'Phòng mới',
@@ -192,7 +175,7 @@ router.post('/rooms', authenticateToken, requirePermission('MANAGE_ROOMS'), asyn
   }
 });
 
-router.patch('/rooms/:id', authenticateToken, requirePermission('MANAGE_ROOMS'), async (req: Request, res: Response) => {
+router.patch('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const roomId = parseInt(req.params.id);
     const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
@@ -202,7 +185,7 @@ router.patch('/rooms/:id', authenticateToken, requirePermission('MANAGE_ROOMS'),
       return res.status(400).json({ success: false, message: 'Trạng thái phòng không hợp lệ' });
     }
 
-    const updated = await SqlDatabase.updateRoom(roomId, {
+    const updated = await PostgresDatabase.updateRoom(roomId, {
       building_id: building_id === undefined ? undefined : parseInt(building_id),
       room_number,
       name,
@@ -228,20 +211,20 @@ router.patch('/rooms/:id', authenticateToken, requirePermission('MANAGE_ROOMS'),
   }
 });
 
-router.delete('/rooms/:id', authenticateToken, requirePermission('MANAGE_ROOMS'), async (req: Request, res: Response) => {
+router.delete('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const roomId = parseInt(req.params.id);
   if (!Number.isInteger(roomId) || roomId <= 0) {
     return res.status(400).json({ success: false, message: 'Mã phòng không hợp lệ' });
   }
 
   try {
-    const deleted = await SqlDatabase.deleteRoom(roomId);
+    const deleted = await PostgresDatabase.deleteRoom(roomId);
     if (!deleted) {
       return res.status(404).json({ success: false, message: 'Phòng không tồn tại' });
     }
     return res.json({ success: true, message: 'Đã xóa phòng' });
   } catch (error: any) {
-    console.error(`[DELETE /rooms/${roomId}] Xóa trong SQL Server thất bại:`, error);
+    console.error(`[DELETE /rooms/${roomId}] PostgreSQL deletion failed:`, error);
     return res.status(500).json({
       success: false,
       message: `Không thể xóa phòng trong cơ sở dữ liệu chính. Có thể phòng này vẫn còn liên kết dữ liệu khác. Chi tiết: ${error.message}`
@@ -252,11 +235,11 @@ router.delete('/rooms/:id', authenticateToken, requirePermission('MANAGE_ROOMS')
 // ================= CATEGORIES & DEVICES =================
 router.get('/categories', async (req: Request, res: Response) => {
   try {
-    const categories = await SqlDatabase.getCategories();
+    const categories = await PostgresDatabase.getCategories();
     res.json({ success: true, data: categories });
   } catch (err) {
-    const categories = Database.getCategories();
-    res.json({ success: true, data: categories });
+    console.error('Không thể tải danh mục thiết bị từ PostgreSQL:', err);
+    res.status(503).json({ success: false, message: 'Không thể tải danh mục thiết bị. Vui lòng thử lại sau.' });
   }
 });
 
@@ -266,56 +249,42 @@ router.get('/devices', async (req: Request, res: Response) => {
     const status = req.query.status as string | undefined;
     const roomId = req.query.room_id ? parseInt(req.query.room_id as string) : undefined;
 
-    let devices = await SqlDatabase.getDevices(categoryId, status);
+    let devices = await PostgresDatabase.getDevices(categoryId, status);
     if (roomId) {
       devices = devices.filter(d => d.room_id === roomId);
     }
     res.json({ success: true, data: devices });
   } catch (err) {
-    const categoryId = req.query.category_id ? parseInt(req.query.category_id as string) : undefined;
-    const status = req.query.status as string | undefined;
-    const roomId = req.query.room_id ? parseInt(req.query.room_id as string) : undefined;
-
-    let devices = Database.getDevices(categoryId, status);
-    if (roomId) {
-      devices = devices.filter(d => d.room_id === roomId);
-    }
-    res.json({ success: true, data: devices });
+    console.error('Không thể tải thiết bị từ PostgreSQL:', err);
+    res.status(503).json({ success: false, message: 'Không thể tải thiết bị. Vui lòng thử lại sau.' });
   }
 });
 
 router.get('/devices/:id', async (req: Request, res: Response) => {
   const devId = parseInt(req.params.id);
   try {
-    const device = await SqlDatabase.getDeviceById(devId);
+    const device = await PostgresDatabase.getDeviceById(devId);
     if (!device) {
       return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
     }
     res.json({ success: true, data: device });
   } catch (err) {
-    const device = Database.getDeviceById(devId);
-    if (!device) {
-      return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
-    }
-    res.json({ success: true, data: device });
+    console.error(`Không thể tải thiết bị ${devId} từ PostgreSQL:`, err);
+    res.status(503).json({ success: false, message: 'Không thể tải thông tin thiết bị. Vui lòng thử lại sau.' });
   }
 });
 
 router.get('/devices/qr/:qrCode', async (req: Request, res: Response) => {
   try {
-    const dev = await SqlDatabase.getDeviceByQr(req.params.qrCode);
+    const dev = await PostgresDatabase.getDeviceByQr(req.params.qrCode);
     if (!dev) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị tương ứng với mã QR' });
     }
-    const detailedDev = await SqlDatabase.getDeviceById(dev.id);
+    const detailedDev = await PostgresDatabase.getDeviceById(dev.id);
     res.json({ success: true, data: detailedDev });
   } catch (err) {
-    const dev = Database.getDeviceByQr(req.params.qrCode);
-    if (!dev) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị tương ứng với mã QR' });
-    }
-    const detailedDev = Database.getDeviceById(dev.id);
-    res.json({ success: true, data: detailedDev });
+    console.error(`Không thể tải thiết bị QR ${req.params.qrCode} từ PostgreSQL:`, err);
+    res.status(503).json({ success: false, message: 'Không thể tải thông tin thiết bị. Vui lòng thử lại sau.' });
   }
 });
 
@@ -323,7 +292,7 @@ router.post('/devices', authenticateToken, requirePermission('MANAGE_DEVICES'), 
   try {
     const { room_id, category_id, device_code, name, model, serial_number, is_portable, purchase_date, warranty_expiry, specifications } = req.body;
     const qr_code = `QR-DEV-${device_code.toUpperCase()}`;
-    const newDevice = await SqlDatabase.addDevice({
+    const newDevice = await PostgresDatabase.addDevice({
       room_id: room_id ? parseInt(room_id) : null,
       category_id: parseInt(category_id),
       device_code,
@@ -347,7 +316,7 @@ router.patch('/devices/:id/status', authenticateToken, requirePermission('MANAGE
   const devId = parseInt(req.params.id);
   const { status } = req.body;
   try {
-    const updated = await SqlDatabase.updateDeviceStatus(devId, status);
+    const updated = await PostgresDatabase.updateDeviceStatus(devId, status);
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
     }
@@ -367,7 +336,7 @@ router.patch('/devices/:id', authenticateToken, requirePermission('MANAGE_DEVICE
       return res.status(400).json({ success: false, message: 'Trạng thái thiết bị không hợp lệ' });
     }
 
-    const updated = await SqlDatabase.updateDevice(devId, {
+    const updated = await PostgresDatabase.updateDevice(devId, {
       room_id: room_id === '' || room_id === null ? null : room_id === undefined ? undefined : parseInt(room_id),
       category_id: category_id === undefined ? undefined : parseInt(category_id),
       device_code,
@@ -392,10 +361,10 @@ router.patch('/devices/:id', authenticateToken, requirePermission('MANAGE_DEVICE
 router.delete('/devices/:id', authenticateToken, requirePermission('MANAGE_DEVICES'), async (req: Request, res: Response) => {
   const devId = parseInt(req.params.id);
   try {
-    await SqlDatabase.deleteDevice(devId);
+    await PostgresDatabase.deleteDevice(devId);
     return res.json({ success: true, message: 'Đã xóa thiết bị' });
   } catch (error: any) {
-    console.error(`[DELETE /devices/${devId}] Xóa trong SQL Server thất bại:`, error);
+    console.error(`[DELETE /devices/${devId}] PostgreSQL deletion failed:`, error);
     return res.status(500).json({
       success: false,
       message: `Không thể xóa thiết bị. Có thể thiết bị này vẫn còn liên kết dữ liệu khác. Chi tiết: ${error.message}`
@@ -406,71 +375,60 @@ router.delete('/devices/:id', authenticateToken, requirePermission('MANAGE_DEVIC
 // ================= MANUALS & FAQS =================
 router.get('/manuals', async (req: Request, res: Response) => {
   try {
-    const manuals = await SqlDatabase.getManuals();
+    const manuals = await PostgresDatabase.getManuals();
     res.json({ success: true, data: manuals });
-  } catch {
-    const manuals = Database.getManuals();
-    res.json({ success: true, data: manuals });
+  } catch (error) {
+    console.error('Không thể tải tài liệu hướng dẫn từ PostgreSQL:', error);
+    res.status(503).json({ success: false, message: 'Không thể tải tài liệu hướng dẫn. Vui lòng thử lại sau.' });
   }
 });
 
 router.get('/manuals/:id', async (req: Request, res: Response) => {
   const manualId = parseInt(req.params.id);
   try {
-    const manual = await SqlDatabase.getManualById(manualId);
+    const manual = await PostgresDatabase.getManualById(manualId);
     if (!manual) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu hướng dẫn' });
     }
     res.json({ success: true, data: manual });
-  } catch {
-    const manual = Database.getManualById(manualId);
-    if (!manual) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu hướng dẫn' });
-    }
-    res.json({ success: true, data: manual });
+  } catch (error) {
+    console.error(`Không thể tải hướng dẫn ${manualId} từ PostgreSQL:`, error);
+    res.status(503).json({ success: false, message: 'Không thể tải tài liệu hướng dẫn. Vui lòng thử lại sau.' });
   }
 });
 
 router.get('/manuals/device/:deviceId', async (req: Request, res: Response) => {
   const devId = parseInt(req.params.deviceId);
   try {
-    const manual = await SqlDatabase.getManualByDeviceId(devId);
-    if (manual) {
-      return res.json({ success: true, data: manual });
-    }
-  } catch {}
-
-  const device = Database.getDeviceById(devId);
-  if (!device) {
-    return res.status(404).json({ success: false, message: 'Thiết bị không tồn tại' });
+    const manual = await PostgresDatabase.getManualByDeviceId(devId);
+    if (!manual) return res.status(404).json({ success: false, message: 'Chưa có hướng dẫn sử dụng cho thiết bị này' });
+    return res.json({ success: true, data: manual });
+  } catch (error) {
+    console.error(`Không thể tải hướng dẫn cho thiết bị ${devId} từ PostgreSQL:`, error);
+    return res.status(503).json({ success: false, message: 'Không thể tải hướng dẫn. Vui lòng thử lại sau.' });
   }
-  const manual = Database.getManualByDeviceId(devId) || Database.getManualByCategoryId(device.category_id);
-  if (!manual) {
-    return res.status(404).json({ success: false, message: 'Chưa có hướng dẫn sử dụng cho thiết bị này' });
-  }
-  res.json({ success: true, data: manual });
 });
 
 // ================= INCIDENT REPORTS (BÁO HỎNG) =================
+router.get('/incident-reports/mine', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const reports = await PostgresDatabase.getIncidentReports(undefined, undefined, req.user!.id);
+    return res.json({ success: true, data: reports });
+  } catch (error) {
+    console.error('Không thể tải báo hỏng của người dùng từ PostgreSQL:', error);
+    return res.status(503).json({ success: false, message: 'Không thể tải phiếu báo hỏng của bạn. Vui lòng thử lại sau.' });
+  }
+});
+
 router.get('/incident-reports', async (req: Request, res: Response) => {
   const status = req.query.status as string | undefined;
   const roomId = req.query.room_id ? parseInt(req.query.room_id as string) : undefined;
   try {
-    const reports = await SqlDatabase.getIncidentReports(status, roomId);
+    const reports = await PostgresDatabase.getIncidentReports(status, roomId);
     res.json({ success: true, data: reports });
-  } catch {
-    const reports = Database.getIncidentReports(status, roomId);
-    res.json({ success: true, data: reports });
-  }
-});
-
-// Người báo chỉ xem được tiến trình của các phiếu do chính tài khoản mình tạo.
-router.get('/incident-reports/mine', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    const reports = await SqlDatabase.getIncidentReports(undefined, undefined, req.user!.id);
-    res.json({ success: true, data: reports });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message || 'Không thể tải tiến trình báo hỏng.' });
+  } catch (error) {
+    console.error('Không thể tải báo hỏng từ PostgreSQL:', error);
+    res.status(503).json({ success: false, message: 'Không thể tải phiếu báo hỏng. Vui lòng thử lại sau.' });
   }
 });
 
@@ -492,33 +450,18 @@ router.post('/incident-reports', optionalAuth, upload.array('images', 5), async 
     const files = req.files as Express.Multer.File[] | undefined;
     const image_urls = files ? files.map(f => `/uploads/${f.filename}`) : [];
 
-    let newReport;
-    try {
-      newReport = await SqlDatabase.createIncidentReport({
-        room_id: parseInt(room_id),
-        device_id: device_id ? parseInt(device_id) : null,
-        reporter_name,
-        reporter_phone: reporter_phone || '',
-        reporter_role: reporter_role || 'Giảng viên',
-        title,
-        description,
-        image_urls,
-        priority: priority || 'MEDIUM',
-        reporter_id: req.user?.id || 1
-      });
-    } catch {
-      newReport = Database.createIncidentReport({
-        room_id: parseInt(room_id),
-        device_id: device_id ? parseInt(device_id) : null,
-        reporter_name,
-        reporter_phone: reporter_phone || '',
-        reporter_role: reporter_role || 'Giảng viên',
-        title,
-        description,
-        image_urls,
-        priority: priority || 'MEDIUM'
-      });
-    }
+    const newReport = await PostgresDatabase.createIncidentReport({
+      room_id: parseInt(room_id),
+      device_id: device_id ? parseInt(device_id) : null,
+      reporter_name,
+      reporter_phone: reporter_phone || '',
+      reporter_role: reporter_role || 'Giảng viên',
+      title,
+      description,
+      image_urls,
+      priority: priority || 'MEDIUM',
+      reporter_id: req.user?.id
+    });
 
     res.json({
       success: true,
@@ -535,28 +478,24 @@ router.patch('/incident-reports/:id/status', authenticateToken, requirePermissio
   const { status, technician_name, solution_note } = req.body;
   const tech = technician_name || (req.user ? req.user.full_name : undefined);
 
-  let updated;
   try {
-    updated = await SqlDatabase.updateIncidentStatus(reportId, status, req.user?.id, tech, solution_note);
-  } catch {
-    updated = Database.updateIncidentStatus(reportId, status, tech, solution_note);
+    const updated = await PostgresDatabase.updateIncidentStatus(reportId, status, req.user?.id, tech, solution_note);
+    if (!updated) return res.status(404).json({ success: false, message: 'Phiếu báo hỏng không tồn tại' });
+    return res.json({ success: true, message: 'Cập nhật trạng thái thành công', data: updated });
+  } catch (error) {
+    console.error(`Không thể cập nhật phiếu báo hỏng ${reportId} trong PostgreSQL:`, error);
+    return res.status(500).json({ success: false, message: 'Không thể cập nhật phiếu báo hỏng' });
   }
-
-  if (!updated) {
-    return res.status(404).json({ success: false, message: 'Phiếu báo hỏng không tồn tại' });
-  }
-
-  res.json({ success: true, message: 'Cập nhật trạng thái thành công', data: updated });
 });
 
 // ================= MAINTENANCE LOGS =================
 router.get('/maintenance-logs', async (req: Request, res: Response) => {
   try {
-    const logs = await SqlDatabase.getMaintenanceLogs();
+    const logs = await PostgresDatabase.getMaintenanceLogs();
     res.json({ success: true, data: logs });
-  } catch {
-    const logs = Database.getMaintenanceLogs();
-    res.json({ success: true, data: logs });
+  } catch (error) {
+    console.error('Không thể tải nhật ký bảo trì từ PostgreSQL:', error);
+    res.status(503).json({ success: false, message: 'Không thể tải nhật ký bảo trì. Vui lòng thử lại sau.' });
   }
 });
 
@@ -567,9 +506,8 @@ router.post('/maintenance-logs', authenticateToken, requirePermission('RESOLVE_R
     return res.status(400).json({ success: false, message: 'Thiếu thông tin bảo trì bắt buộc' });
   }
 
-  let log;
   try {
-    log = await SqlDatabase.addMaintenanceLog({
+    const log = await PostgresDatabase.addMaintenanceLog({
       report_id: report_id ? parseInt(report_id) : null,
       device_id: parseInt(device_id),
       technician_name: tech,
@@ -578,18 +516,11 @@ router.post('/maintenance-logs', authenticateToken, requirePermission('RESOLVE_R
       parts_replaced: parts_replaced || '',
       cost: cost ? parseFloat(cost) : 0
     });
-  } catch {
-    log = Database.addMaintenanceLog({
-      report_id: report_id ? parseInt(report_id) : null,
-      device_id: parseInt(device_id),
-      technician_name: tech,
-      action_taken,
-      parts_replaced: parts_replaced || '',
-      cost: cost ? parseFloat(cost) : 0,
-      note
-    });
+    return res.json({ success: true, data: log });
+  } catch (error) {
+    console.error('Không thể tạo nhật ký bảo trì trong PostgreSQL:', error);
+    return res.status(500).json({ success: false, message: 'Không thể lưu nhật ký bảo trì' });
   }
-  res.json({ success: true, data: log });
 });
 
 // ================= QR CODE GENERATOR =================

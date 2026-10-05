@@ -19,8 +19,15 @@ import {
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-  timeout: 10000
+  timeout: 60000
 });
+
+export const getAssetUrl = (assetPath: string): string => {
+  if (/^https?:\/\//i.test(assetPath)) return assetPath;
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+  const apiOrigin = new URL(apiBaseUrl, window.location.origin).origin;
+  return new URL(assetPath, apiOrigin).toString();
+};
 
 // Automatically attach JWT token from localStorage if present
 api.interceptors.request.use((config) => {
