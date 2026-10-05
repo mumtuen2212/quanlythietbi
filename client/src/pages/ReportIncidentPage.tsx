@@ -49,6 +49,8 @@ export const ReportIncidentPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [successReport, setSuccessReport] = useState<IncidentReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [myReports, setMyReports] = useState<IncidentReport[]>([]);
+  const [myReportsLoading, setMyReportsLoading] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -61,6 +63,11 @@ export const ReportIncidentPage: React.FC = () => {
   useEffect(() => {
     loadInitialData();
   }, []);
+
+  useEffect(() => {
+    if (user?.id) void loadMyReports();
+    else setMyReports([]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (selectedRoomId) {
@@ -94,6 +101,28 @@ export const ReportIncidentPage: React.FC = () => {
     } catch (err) {
       console.error('Error loading devices for room:', err);
     }
+  };
+
+  const loadMyReports = async () => {
+    try {
+      setMyReportsLoading(true);
+      setMyReports(await ApiService.getMyIncidentReports());
+    } catch (err) {
+      console.warn('Không thể tải tiến trình báo hỏng:', err);
+    } finally {
+      setMyReportsLoading(false);
+    }
+  };
+
+  const reportStatusInfo = (status: IncidentReport['status']) => {
+    const statusMap: Record<IncidentReport['status'], { label: string; detail: string; style: string }> = {
+      PENDING: { label: 'Chờ tiếp nhận', detail: 'KTV chưa nhận phiếu.', style: 'bg-amber-50 text-amber-700 border-amber-200' },
+      ASSIGNED: { label: 'Đã tiếp nhận', detail: 'KTV đã nhận xử lý phiếu này.', style: 'bg-sky-50 text-sky-700 border-sky-200' },
+      IN_PROGRESS: { label: 'Đang sửa chữa', detail: 'KTV đang kiểm tra hoặc sửa thiết bị.', style: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+      RESOLVED: { label: 'Đã hoàn thành', detail: 'Sự cố đã được xử lý xong.', style: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+      CANCELLED: { label: 'Đã hủy', detail: 'Phiếu này đã được hủy.', style: 'bg-slate-100 text-slate-600 border-slate-200' }
+    };
+    return statusMap[status];
   };
 
   const startCamera = async (facing: 'environment' | 'user' = cameraFacing) => {
@@ -148,6 +177,11 @@ export const ReportIncidentPage: React.FC = () => {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(blob => {
       if (blob) {
+        if (selectedImages.length >= 5) {
+          setErrorMessage('Bạn chỉ có thể gửi tối đa 5 ảnh cho một báo cáo.');
+          stopCamera();
+          return;
+        }
         const file = new File([blob], `camera-snap-${Date.now()}.jpg`, { type: 'image/jpeg' });
         setSelectedImages(prev => [...prev, file]);
         const url = URL.createObjectURL(blob);
@@ -167,7 +201,13 @@ export const ReportIncidentPage: React.FC = () => {
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const filesArray = Array.from(e.target.files);
+      const remainingSlots = Math.max(0, 5 - selectedImages.length);
+      const filesArray = Array.from(e.target.files)
+        .filter(file => file.type.startsWith('image/') && file.size <= 10 * 1024 * 1024)
+        .slice(0, remainingSlots);
+      if (filesArray.length !== e.target.files.length) {
+        setErrorMessage('Chỉ nhận ảnh tối đa 10 MB và tối đa 5 ảnh cho một báo cáo.');
+      }
       setSelectedImages(prev => [...prev, ...filesArray]);
       const newUrls = filesArray.map(file => URL.createObjectURL(file));
       setPreviewUrls(prev => [...prev, ...newUrls]);
@@ -206,6 +246,7 @@ export const ReportIncidentPage: React.FC = () => {
 
       const res = await ApiService.createIncidentReport(formData);
       setSuccessReport(res.data);
+      if (user?.id) setMyReports(previous => [res.data, ...previous]);
     } catch (err: any) {
       console.error('Error submitting report:', err);
       setErrorMessage(err.response?.data?.message || 'Có lỗi xảy ra khi gửi báo cáo sự cố.');
@@ -226,6 +267,44 @@ export const ReportIncidentPage: React.FC = () => {
           Gửi thông tin hỏng hóc tới bộ phận kỹ thuật để được hỗ trợ sửa chữa và thay thế kịp thời trước giờ học.
         </p>
       </div>
+
+      {user && (
+        <section className="rounded-3xl border border-sky-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 text-base font-extrabold text-slate-900"><RefreshCw className="h-4 w-4 text-sky-600" />Tiến trình báo hỏng của bạn</h2>
+              <p className="mt-1 text-xs text-slate-500">Theo dõi KTV đã tiếp nhận, đang sửa hay đã hoàn thành.</p>
+            </div>
+            <button type="button" onClick={loadMyReports} disabled={myReportsLoading} className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:opacity-60">
+              {myReportsLoading ? 'Đang tải...' : 'Làm mới'}
+            </button>
+          </div>
+
+          {myReports.length === 0 && !myReportsLoading ? (
+            <p className="rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-500">Bạn chưa gửi phiếu báo hỏng nào.</p>
+          ) : (
+            <div className="space-y-2">
+              {myReports.slice(0, 5).map(report => {
+                const status = reportStatusInfo(report.status);
+                return (
+                  <div key={report.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">{report.title}</p>
+                        <p className="mt-0.5 text-[11px] text-slate-500">{report.report_code} • Phòng {report.room_name || 'chưa rõ'} • {report.created_at}</p>
+                      </div>
+                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold ${status.style}`}>{status.label}</span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-600">{status.detail}</p>
+                    {report.assigned_technician_name && <p className="mt-1 text-xs text-sky-700">KTV phụ trách: <strong>{report.assigned_technician_name}</strong></p>}
+                    {report.solution_note && <p className="mt-1 text-xs text-emerald-700">Ghi chú xử lý: {report.solution_note}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Main Form */}
       <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm">

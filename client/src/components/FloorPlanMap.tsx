@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Building2, 
@@ -9,11 +9,7 @@ import {
   QrCode, 
   ArrowRight, 
   CheckCircle2, 
-  Wrench, 
-  Mic, 
-  Tv, 
-  Volume2, 
-  Wind,
+  Wrench,
   Info,
   X
 } from 'lucide-react';
@@ -31,6 +27,8 @@ interface FloorPlanMapProps {
   onStartNavigateToRoom?: (room: Room) => void;
   isTechnicianMode?: boolean;
   onMapClick?: (event: React.MouseEvent<SVGSVGElement>) => void;
+  editable?: boolean;
+  onMoveRoom?: (room: Room, position: Pick<Room, 'x' | 'y' | 'width' | 'height' | 'door_x' | 'door_y'>) => void;
 }
 
 export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
@@ -43,13 +41,107 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
   indoorPath,
   onStartNavigateToRoom,
   isTechnicianMode = false,
-  onMapClick
+  onMapClick,
+  editable = false,
+  onMoveRoom
 }) => {
+  const [dragOverrides, setDragOverrides] = useState<Record<number, Pick<Room, 'x' | 'y' | 'width' | 'height' | 'door_x' | 'door_y'>>>({});
+  const dragRef = useRef<{ room: Room; pointerId: number; offsetX: number; offsetY: number; position: Pick<Room, 'x' | 'y' | 'width' | 'height' | 'door_x' | 'door_y'> } | null>(null);
   const floorRooms = rooms.filter(r => r.building_id === building.id && r.floor === selectedFloor);
   const availableFloors = Array.from(
     new Set(rooms.filter(r => r.building_id === building.id).map(r => r.floor))
   ).sort((a, b) => a - b);
   const visibleFloors = availableFloors.length > 0 ? availableFloors : [1];
+  const maxRoomsPerRow = 10;
+  const roomsPerRow = Math.min(maxRoomsPerRow, Math.max(1, floorRooms.length));
+  const roomGap = 12;
+  const generatedRoomWidth = Math.max(72, Math.min(180, (868 - roomGap * Math.max(0, roomsPerRow - 1)) / roomsPerRow));
+  const generatedRoomHeight = 130;
+
+  // Danh mục phòng được nhập từ SQL chưa có tọa độ mặt bằng chi tiết sẽ mang
+  // tọa độ 0,0. Tự dàn toàn bộ phòng về cùng một phía hành lang; phòng nào đã
+  // được admin kéo thả và lưu vị trí riêng vẫn được giữ nguyên.
+  const laidOutFloorRooms = floorRooms.map((room, index) => {
+    // Các kích thước lớn từ sơ đồ cũ không còn phù hợp với bố cục một phía.
+    // Chỉ giữ vị trí đã kéo thả theo kích thước chuẩn mới.
+    const hasCurrentLayout = room.x > 0 && room.y > 0 &&
+      Math.abs(room.width - generatedRoomWidth) < 3 && Math.abs(room.height - generatedRoomHeight) < 3;
+    if (hasCurrentLayout) {
+      const savedPosition = {
+        x: room.x,
+        y: room.y,
+        width: generatedRoomWidth,
+        height: generatedRoomHeight,
+        door_x: room.x + generatedRoomWidth / 2,
+        door_y: room.y + generatedRoomHeight
+      };
+      const position = { ...savedPosition, ...(dragOverrides[room.id] || {}) };
+      return { ...room, ...position };
+    }
+
+    const row = Math.floor(index / maxRoomsPerRow);
+    const sideIndex = index % maxRoomsPerRow;
+    const roomsOnSide = Math.min(maxRoomsPerRow, floorRooms.length - row * maxRoomsPerRow);
+    const availableWidth = 868;
+    const roomWidth = Math.max(72, Math.min(180, (availableWidth - roomGap * Math.max(0, roomsOnSide - 1)) / Math.max(1, roomsOnSide)));
+    const x = 16 + sideIndex * (roomWidth + roomGap);
+    const y = 50 + row * 145;
+    const height = generatedRoomHeight;
+
+    const { x: _x, y: _y, width: _width, height: _height, door_x: _doorX, door_y: _doorY, ...roomInfo } = room;
+    const generatedPosition = {
+      x,
+      y,
+      width: roomWidth,
+      height,
+      door_x: x + roomWidth / 2,
+      door_y: y + height
+    };
+    return {
+      ...roomInfo,
+      ...generatedPosition,
+      ...(dragOverrides[room.id] || {})
+    };
+  });
+
+  const roomAtPointer = (event: React.PointerEvent<SVGGElement>) => {
+    const svg = event.currentTarget.ownerSVGElement;
+    if (!svg) return { x: 0, y: 0 };
+    const rect = svg.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * 900,
+      y: ((event.clientY - rect.top) / rect.height) * 420
+    };
+  };
+
+  const beginDrag = (event: React.PointerEvent<SVGGElement>, room: Room) => {
+    if (!editable || !onMoveRoom) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const pointer = roomAtPointer(event);
+    const position = { x: room.x, y: room.y, width: room.width, height: room.height, door_x: room.door_x, door_y: room.door_y };
+    dragRef.current = { room, pointerId: event.pointerId, offsetX: pointer.x - room.x, offsetY: pointer.y - room.y, position };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveDrag = (event: React.PointerEvent<SVGGElement>) => {
+    const dragging = dragRef.current;
+    if (!dragging || dragging.pointerId !== event.pointerId) return;
+    const pointer = roomAtPointer(event);
+    const x = Math.max(10, Math.min(890 - dragging.position.width, pointer.x - dragging.offsetX));
+    const y = Math.max(30, Math.min(390 - dragging.position.height, pointer.y - dragging.offsetY));
+    const position = { ...dragging.position, x, y, door_x: x + dragging.position.width / 2, door_y: y + dragging.position.height };
+    dragging.position = position;
+    setDragOverrides(previous => ({ ...previous, [dragging.room.id]: position }));
+  };
+
+  const finishDrag = (event: React.PointerEvent<SVGGElement>) => {
+    const dragging = dragRef.current;
+    if (!dragging || dragging.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    onMoveRoom?.(dragging.room, dragging.position);
+  };
 
   const indoorPathD = indoorPath && indoorPath.length > 1
     ? indoorPath.reduce((acc, pt, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '')
@@ -68,6 +160,8 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
             <p className="text-xs text-slate-500">Chọn tầng để xem mặt bằng phòng học</p>
           </div>
         </div>
+
+        {editable && <p className="w-full text-[11px] font-semibold text-sky-700 bg-sky-50 border border-sky-100 rounded-xl px-3 py-2">Chế độ sắp xếp: kéo thả phòng đến vị trí mong muốn. Khi thả, vị trí sẽ được lưu.</p>}
 
         {/* Floor Buttons */}
         <div className="flex items-center gap-1.5 overflow-x-auto">
@@ -98,14 +192,14 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
       </div>
 
       {/* Interactive 2D Floor Plan Canvas */}
-      <div className="relative w-full h-[460px] bg-slate-900 rounded-3xl overflow-hidden border border-slate-700 shadow-xl select-none">
+      <div className="relative w-full h-[520px] bg-slate-900 rounded-3xl overflow-hidden border border-slate-700 shadow-xl select-none">
         {/* Floor Indicator Overlay */}
         <div className="absolute top-4 left-4 z-10 bg-slate-900/90 backdrop-blur px-3 py-1.5 rounded-xl border border-slate-700 text-white text-xs font-bold flex items-center gap-2">
           <Layers className="w-4 h-4 text-sky-400" />
           <span>Mặt Bằng Tầng {selectedFloor} - {building.name.split('-')[0].trim()}</span>
         </div>
 
-        <svg viewBox="0 0 900 320" className="w-full h-full p-4" onClick={onMapClick}>
+        <svg viewBox="0 0 900 420" className="w-full h-full p-4" onClick={onMapClick}>
           <defs>
             <filter id="indoorGlow" x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur stdDeviation="3" result="blur" />
@@ -114,11 +208,11 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
           </defs>
 
           {/* Building Outer Floor Plate */}
-          <rect x="0" y="20" width="900" height="280" rx="16" fill="#1e293b" stroke="#334155" strokeWidth="3" />
+          <rect x="0" y="20" width="900" height="380" rx="16" fill="#1e293b" stroke="#334155" strokeWidth="3" />
 
           {/* Central Main Hallway Corridor */}
-          <rect x="10" y="190" width="880" height="40" fill="#0f172a" stroke="#1e293b" strokeWidth="2" />
-          <text x="450" y="215" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="700" letterSpacing="3">
+          <rect x="10" y="205" width="880" height="40" fill="#0f172a" stroke="#1e293b" strokeWidth="2" />
+          <text x="450" y="230" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="700" letterSpacing="3">
             HÀNH LANG CHÍNH TẦNG {selectedFloor}
           </text>
 
@@ -155,7 +249,7 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
           )}
 
           {/* Classrooms & Functional Rooms */}
-          {floorRooms.map(room => {
+          {laidOutFloorRooms.map(room => {
             const isRoomSelected = selectedRoom?.id === room.id;
             const isDamaged = room.status === 'DAMAGED' || (Boolean(room.pendingReportsCount) && (room.pendingReportsCount ?? 0) > 0);
             const isMaintenance = room.status === 'MAINTENANCE';
@@ -187,8 +281,15 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
             return (
               <g
                 key={room.id}
-                onClick={() => onSelectRoom(room)}
-                className="cursor-pointer group transition-all"
+                onClick={event => {
+                  if (editable) event.stopPropagation();
+                  onSelectRoom(room);
+                }}
+                onPointerDown={event => beginDrag(event, room)}
+                onPointerMove={moveDrag}
+                onPointerUp={finishDrag}
+                onPointerCancel={finishDrag}
+                className={`${editable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} group transition-all`}
               >
                 {/* Room Boundary Box */}
                 <rect
@@ -271,7 +372,7 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
           })}
         </svg>
 
-        {floorRooms.length === 0 && (
+        {laidOutFloorRooms.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-xs">
             Chưa có sơ đồ phòng học cho tầng này.
           </div>
@@ -304,69 +405,8 @@ export const FloorPlanMap: React.FC<FloorPlanMapProps> = ({
             </button>
           </div>
 
-          {/* Equipment list in this room */}
-          <div className="pt-2 border-t border-slate-100 space-y-2">
-            <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              Thiết bị trong phòng ({selectedRoom.room_number === 'A.301' ? 4 : selectedRoom.room_number === 'A.302' ? 2 : 1})
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-              {selectedRoom.room_number === 'A.301' && (
-                <>
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Mic className="w-4 h-4 text-sky-600" />
-                      <span className="font-semibold text-slate-800">Bộ Micro Sisu màu xanh</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">Tốt</span>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Tv className="w-4 h-4 text-indigo-600" />
-                      <span className="font-semibold text-slate-800">Máy chiếu Panasonic PT-LB426</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">Tốt</span>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Volume2 className="w-4 h-4 text-amber-600" />
-                      <span className="font-semibold text-slate-800">Âm ly Nanomax Pro-900</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">Tốt</span>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Wind className="w-4 h-4 text-teal-600" />
-                      <span className="font-semibold text-slate-800">Điều hòa Daikin 2.5HP</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">Tốt</span>
-                  </div>
-                </>
-              )}
-
-              {selectedRoom.room_number === 'A.302' && (
-                <>
-                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Mic className="w-4 h-4 text-rose-600" />
-                      <span className="font-semibold text-rose-900">Bộ Micro Sisu màu xanh (A.302)</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold animate-pulse">Báo hỏng</span>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Tv className="w-4 h-4 text-indigo-600" />
-                      <span className="font-semibold text-slate-800">Máy chiếu Epson EB-E01</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">Tốt</span>
-                  </div>
-                </>
-              )}
-            </div>
+          <div className="pt-3 border-t border-slate-100 rounded-xl bg-sky-50/70 px-3.5 py-3 text-xs text-sky-800">
+            Mở chi tiết phòng để xem danh sách thiết bị, hướng dẫn sử dụng và báo hỏng theo dữ liệu SQL.
           </div>
 
           {/* Actions Button Row */}

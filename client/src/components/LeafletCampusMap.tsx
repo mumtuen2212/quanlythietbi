@@ -209,16 +209,21 @@ const MapClickHandler: React.FC<{
 
 const MAX_MAP_ZOOM = 19;
 
-const MapController: React.FC<{ targetCoords: [number, number] | null }> = ({ targetCoords }) => {
+const MapController: React.FC<{ targetCoords: [number, number] | null; routeCoordinates?: [number, number][] }> = ({ targetCoords, routeCoordinates }) => {
   const map = useMap();
   React.useEffect(() => {
     map.setMaxZoom(MAX_MAP_ZOOM);
+    if (routeCoordinates && routeCoordinates.length > 1) {
+      // Giữ cả vị trí hiện tại lẫn điểm đến trong khung nhìn như Google Maps.
+      map.fitBounds(L.latLngBounds(routeCoordinates), { padding: [48, 48], maxZoom: 17, animate: false });
+      return;
+    }
     if (targetCoords) {
       // A direct view change keeps room selection precise without the visible
       // fly animation/jitter caused by an adjacent sidebar reflow.
       map.setView(targetCoords, 18, { animate: false });
     }
-  }, [targetCoords, map]);
+  }, [targetCoords, routeCoordinates, map]);
   return null;
 };
 
@@ -306,14 +311,14 @@ export const LeafletCampusMap: React.FC<LeafletCampusMapProps> = ({
             scrollWheelZoom={true}
         style={{ width: '100%', height: '100%', cursor: pickMode ? 'crosshair' : undefined }}
       >
-        <MapController targetCoords={targetCoords} />
+        <MapController targetCoords={targetCoords} routeCoordinates={routeCoordinates} />
         <MapClickHandler pickMode={pickMode} buildings={buildings} onPickBuilding={onPickBuilding} onPickMapPosition={onPickMapPosition} />
 
         {userLocation && <Marker position={userLocation} icon={userLocationIcon} zIndexOffset={1000} />}
         {routeCoordinates && routeCoordinates.length > 1 && (
           <Polyline
             positions={routeCoordinates}
-            pathOptions={{ color: '#2563eb', weight: 6, opacity: 0.85, dashArray: '10 8' }}
+            pathOptions={{ color: '#2563eb', weight: 6, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
           />
         )}
 

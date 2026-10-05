@@ -812,7 +812,7 @@ export class SqlDatabase {
   }
 
   // ================= INCIDENT REPORTS =================
-  static async getIncidentReports(status?: string, roomId?: number): Promise<IncidentReport[]> {
+  static async getIncidentReports(status?: string, roomId?: number, reporterId?: number): Promise<IncidentReport[]> {
     let query = `
       SELECT
         b.BaoHongID AS id,
@@ -849,6 +849,10 @@ export class SqlDatabase {
     if (roomId) {
       query += ` AND b.PhongHocID = @roomId`;
       params.roomId = roomId;
+    }
+    if (reporterId) {
+      query += ` AND b.NguoiBaoID = @reporterId`;
+      params.reporterId = reporterId;
     }
 
     query += ` ORDER BY b.BaoHongID DESC`;

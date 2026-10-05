@@ -6,15 +6,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const qrcode_1 = __importDefault(require("qrcode"));
 const db_1 = require("../data/db");
 const sqlDb_1 = require("../data/sqlDb");
 const auth_1 = require("./auth");
 const router = (0, express_1.Router)();
 // Multer configuration for file uploads
+// Thư mục không có sẵn trong bản source mới thì Multer sẽ lỗi ngay khi có ảnh.
+// Tạo nó khi server khởi động để ảnh chụp và ảnh tải từ máy đều lưu được.
+const uploadsDirectory = path_1.default.join(__dirname, '../../uploads');
+fs_1.default.mkdirSync(uploadsDirectory, { recursive: true });
 const storage = multer_1.default.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, path_1.default.join(__dirname, '../../uploads'));
+        cb(null, uploadsDirectory);
     },
     filename: (req, file, cb) => {
         const ext = path_1.default.extname(file.originalname);
@@ -24,7 +29,13 @@ const storage = multer_1.default.diskStorage({
 });
 const upload = (0, multer_1.default)({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    fileFilter: (req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+            return cb(new Error('Chỉ có thể gửi tệp hình ảnh.'));
+        }
+        cb(null, true);
+    }
 });
 // ================= DASHBOARD & STATS =================
 router.get('/stats', async (req, res) => {
@@ -162,7 +173,7 @@ router.get('/rooms/qr/:qrCode', async (req, res) => {
         res.status(503).json({ success: false, message: 'Không thể tải thông tin phòng. Vui lòng thử lại sau.' });
     }
 });
-router.post('/rooms', auth_1.authenticateToken, (0, auth_1.requireRole)(['ADMIN']), async (req, res) => {
+router.post('/rooms', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_ROOMS'), async (req, res) => {
     try {
         const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
         const newRoom = await sqlDb_1.SqlDatabase.addRoom({
@@ -189,7 +200,7 @@ router.post('/rooms', auth_1.authenticateToken, (0, auth_1.requireRole)(['ADMIN'
         return res.status(500).json({ success: false, message: error.message });
     }
 });
-router.patch('/rooms/:id', auth_1.authenticateToken, (0, auth_1.requireRole)(['ADMIN']), async (req, res) => {
+router.patch('/rooms/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_ROOMS'), async (req, res) => {
     try {
         const roomId = parseInt(req.params.id);
         const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
@@ -223,7 +234,7 @@ router.patch('/rooms/:id', auth_1.authenticateToken, (0, auth_1.requireRole)(['A
         return res.status(500).json({ success: false, message: error.message });
     }
 });
-router.delete('/rooms/:id', auth_1.authenticateToken, (0, auth_1.requireRole)(['ADMIN']), async (req, res) => {
+router.delete('/rooms/:id', auth_1.authenticateToken, (0, auth_1.requirePermission)('MANAGE_ROOMS'), async (req, res) => {
     const roomId = parseInt(req.params.id);
     if (!Number.isInteger(roomId) || roomId <= 0) {
         return res.status(400).json({ success: false, message: 'Mã phòng không hợp lệ' });
@@ -451,6 +462,16 @@ router.get('/incident-reports', async (req, res) => {
     catch {
         const reports = db_1.Database.getIncidentReports(status, roomId);
         res.json({ success: true, data: reports });
+    }
+});
+// Người báo chỉ xem được tiến trình của các phiếu do chính tài khoản mình tạo.
+router.get('/incident-reports/mine', auth_1.authenticateToken, async (req, res) => {
+    try {
+        const reports = await sqlDb_1.SqlDatabase.getIncidentReports(undefined, undefined, req.user.id);
+        res.json({ success: true, data: reports });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message || 'Không thể tải tiến trình báo hỏng.' });
     }
 });
 router.post('/incident-reports', auth_1.optionalAuth, upload.array('images', 5), async (req, res) => {

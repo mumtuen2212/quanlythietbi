@@ -31,7 +31,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const location = useLocation();
   const { user, isAuthenticated, logout, hasPermission } = useAuth();
-  const canAccessAdmin = Boolean(user && (user.role_name === 'ADMIN' || hasPermission('MANAGE_ROOMS')));
+  const canAccessAdmin = Boolean(user && [
+    'MANAGE_DEVICES', 'MANAGE_ROOMS', 'VIEW_REPORTS', 'RESOLVE_REPORTS', 'GRANT_PERMISSIONS', 'CREATE_REPORT'
+  ].some(permission => hasPermission(permission as Parameters<typeof hasPermission>[0])));
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');

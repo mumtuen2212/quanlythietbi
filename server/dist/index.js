@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const path_1 = __importDefault(require("path"));
+const multer_1 = __importDefault(require("multer"));
 const api_1 = __importDefault(require("./routes/api"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const app = (0, express_1.default)();
@@ -23,6 +24,21 @@ app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../
 // Mount API routes
 app.use('/api/auth', auth_1.default);
 app.use('/api', api_1.default);
+// Trả về thông báo rõ ràng cho biểu mẫu báo hỏng khi ảnh không hợp lệ/quá lớn.
+app.use((error, req, res, next) => {
+    if (error instanceof multer_1.default.MulterError) {
+        const message = error.code === 'LIMIT_FILE_SIZE'
+            ? 'Mỗi ảnh tối đa 10 MB.'
+            : error.code === 'LIMIT_UNEXPECTED_FILE'
+                ? 'Bạn chỉ có thể gửi tối đa 5 ảnh.'
+                : 'Không thể tải ảnh lên. Vui lòng thử lại.';
+        return res.status(400).json({ success: false, message });
+    }
+    if (error) {
+        return res.status(400).json({ success: false, message: error.message || 'Không thể tải ảnh lên.' });
+    }
+    next();
+});
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({

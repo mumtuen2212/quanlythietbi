@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
 import QRCode from 'qrcode';
 import { Database } from '../data/db';
 import { SqlDatabase } from '../data/sqlDb';
@@ -9,9 +10,14 @@ import { authenticateToken, requirePermission, requireRole, optionalAuth, AuthRe
 const router = Router();
 
 // Multer configuration for file uploads
+// Thư mục không có sẵn trong bản source mới thì Multer sẽ lỗi ngay khi có ảnh.
+// Tạo nó khi server khởi động để ảnh chụp và ảnh tải từ máy đều lưu được.
+const uploadsDirectory = path.join(__dirname, '../../uploads');
+fs.mkdirSync(uploadsDirectory, { recursive: true });
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '../../uploads'));
+    cb(null, uploadsDirectory);
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -22,7 +28,13 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Chỉ có thể gửi tệp hình ảnh.'));
+    }
+    cb(null, true);
+  }
 });
 
 // ================= DASHBOARD & STATS =================
@@ -153,7 +165,7 @@ router.get('/rooms/qr/:qrCode', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/rooms', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+router.post('/rooms', authenticateToken, requirePermission('MANAGE_ROOMS'), async (req: Request, res: Response) => {
   try {
     const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
     const newRoom = await SqlDatabase.addRoom({
@@ -180,7 +192,7 @@ router.post('/rooms', authenticateToken, requireRole(['ADMIN']), async (req: Req
   }
 });
 
-router.patch('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+router.patch('/rooms/:id', authenticateToken, requirePermission('MANAGE_ROOMS'), async (req: Request, res: Response) => {
   try {
     const roomId = parseInt(req.params.id);
     const { building_id, room_number, name, floor, qr_code, status, description, x, y, width, height, room_type, door_x, door_y, latitude, longitude } = req.body;
@@ -216,7 +228,7 @@ router.patch('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req
   }
 });
 
-router.delete('/rooms/:id', authenticateToken, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+router.delete('/rooms/:id', authenticateToken, requirePermission('MANAGE_ROOMS'), async (req: Request, res: Response) => {
   const roomId = parseInt(req.params.id);
   if (!Number.isInteger(roomId) || roomId <= 0) {
     return res.status(400).json({ success: false, message: 'Mã phòng không hợp lệ' });
@@ -449,6 +461,16 @@ router.get('/incident-reports', async (req: Request, res: Response) => {
   } catch {
     const reports = Database.getIncidentReports(status, roomId);
     res.json({ success: true, data: reports });
+  }
+});
+
+// Người báo chỉ xem được tiến trình của các phiếu do chính tài khoản mình tạo.
+router.get('/incident-reports/mine', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const reports = await SqlDatabase.getIncidentReports(undefined, undefined, req.user!.id);
+    res.json({ success: true, data: reports });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message || 'Không thể tải tiến trình báo hỏng.' });
   }
 });
 

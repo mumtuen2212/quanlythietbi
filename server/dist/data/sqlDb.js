@@ -757,7 +757,7 @@ class SqlDatabase {
         return row ? { ...row, quick_faq: [] } : null;
     }
     // ================= INCIDENT REPORTS =================
-    static async getIncidentReports(status, roomId) {
+    static async getIncidentReports(status, roomId, reporterId) {
         let query = `
       SELECT
         b.BaoHongID AS id,
@@ -793,6 +793,10 @@ class SqlDatabase {
         if (roomId) {
             query += ` AND b.PhongHocID = @roomId`;
             params.roomId = roomId;
+        }
+        if (reporterId) {
+            query += ` AND b.NguoiBaoID = @reporterId`;
+            params.reporterId = reporterId;
         }
         query += ` ORDER BY b.BaoHongID DESC`;
         const rows = await SqlDatabase.query(query, params);

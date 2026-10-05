@@ -45,7 +45,7 @@ export const App: React.FC = () => {
               <Route
                 path="/admin"
                 element={
-                  <ProtectedRoute requiredPermission="MANAGE_ROOMS">
+                  <ProtectedRoute requiredAnyPermissions={['MANAGE_DEVICES', 'MANAGE_ROOMS', 'VIEW_REPORTS', 'RESOLVE_REPORTS', 'GRANT_PERMISSIONS', 'CREATE_REPORT']}>
                     <AdminDashboardPage />
                   </ProtectedRoute>
                 }

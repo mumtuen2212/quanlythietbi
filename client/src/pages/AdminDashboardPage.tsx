@@ -22,7 +22,8 @@ import {
   Pencil,
   Trash2,
   MapPin,
-  X
+  X,
+  Search
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { 
@@ -47,13 +48,34 @@ import { LeafletCampusMap } from '../components/LeafletCampusMap';
 export const AdminDashboardPage: React.FC = () => {
   const { user: currentUser, hasPermission, refreshUser } = useAuth();
   const isAdmin = currentUser?.role_name === 'ADMIN';
+  const isReporter = currentUser?.role_name === 'TEACHER' || currentUser?.role_name === 'STUDENT';
+  const canManageDevices = hasPermission('MANAGE_DEVICES');
   const canSeeRoomsTab = hasPermission('MANAGE_ROOMS');
-  const canManageRoomCrud = isAdmin;
+  const canManageRoomCrud = canSeeRoomsTab;
+  const canViewReports = isReporter || hasPermission('VIEW_REPORTS') || hasPermission('RESOLVE_REPORTS') || hasPermission('ASSIGN_REPORTS');
+  const canResolveReports = hasPermission('RESOLVE_REPORTS');
+  const canViewLogs = canResolveReports;
+  // Tài khoản Admin (bao gồm Admin cấp 1) luôn có quyền quản lý các tài khoản khác.
+  const canManageAccounts = isAdmin || hasPermission('GRANT_PERMISSIONS');
   const [activeTab, setActiveTab] = useState<'reports' | 'devices' | 'rooms' | 'logs' | 'permissions'>('reports');
 
   // Data
   const [reports, setReports] = useState<IncidentReport[]>([]);
+  const [mySubmittedReports, setMySubmittedReports] = useState<IncidentReport[]>([]);
+  const [reportListView, setReportListView] = useState<'all' | 'mine'>('all');
   const [devices, setDevices] = useState<Device[]>([]);
+  const [devicePage, setDevicePage] = useState(1);
+  const [buildingPage, setBuildingPage] = useState(1);
+  const [roomPage, setRoomPage] = useState(1);
+  const [reportPage, setReportPage] = useState(1);
+  const [logPage, setLogPage] = useState(1);
+  const [userPage, setUserPage] = useState(1);
+  const [reportSearch, setReportSearch] = useState('');
+  const [logSearch, setLogSearch] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+  const [deviceSearch, setDeviceSearch] = useState('');
+  const [roomSearch, setRoomSearch] = useState('');
+  const [buildingSearch, setBuildingSearch] = useState('');
   const [rooms, setRooms] = useState<Room[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [categories, setCategories] = useState<DeviceCategory[]>([]);
@@ -62,6 +84,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userMsg, setUserMsg] = useState<{ id: number; text: string; error?: boolean } | null>(null);
+  const [savingRoleUserId, setSavingRoleUserId] = useState<number | null>(null);
   const [userModal, setUserModal] = useState<{ mode: 'create' | 'edit'; user?: User } | null>(null);
   const [userForm, setUserForm] = useState({
     username: '', password: '', full_name: '', email: '', phone: '', role_name: 'TECHNICIAN' as RoleName
@@ -69,6 +92,7 @@ export const AdminDashboardPage: React.FC = () => {
 
   // Resolution Modal State
   const [selectedReport, setSelectedReport] = useState<IncidentReport | null>(null);
+  const [selectedReportImage, setSelectedReportImage] = useState<{ url: string; reportCode: string } | null>(null);
   const [techName, setTechName] = useState('KTV. Trần Minh Quang');
   const [solutionNote, setSolutionNote] = useState('');
   const [newStatus, setNewStatus] = useState<string>('IN_PROGRESS');
@@ -91,6 +115,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [showRoomModal, setShowRoomModal] = useState(false);
   const [showBuildingModal, setShowBuildingModal] = useState(false);
   const [showBuildingManager, setShowBuildingManager] = useState(false);
+  const [managementSection, setManagementSection] = useState<'buildings' | 'rooms'>('rooms');
   const [editingBuilding, setEditingBuilding] = useState<Building | null>(null);
   const [showBuildingMapPicker, setShowBuildingMapPicker] = useState(false);
   const [showRoomMapPicker, setShowRoomMapPicker] = useState(false);
@@ -127,6 +152,14 @@ export const AdminDashboardPage: React.FC = () => {
     loadAllData();
   }, []);
 
+  useEffect(() => {
+    if (activeTab === 'reports' && !canViewReports) setActiveTab(canManageDevices ? 'devices' : canSeeRoomsTab ? 'rooms' : 'logs');
+    if (activeTab === 'devices' && !canManageDevices) setActiveTab(canViewReports ? 'reports' : canSeeRoomsTab ? 'rooms' : 'logs');
+    if (activeTab === 'rooms' && !canSeeRoomsTab) setActiveTab(canManageDevices ? 'devices' : canViewReports ? 'reports' : 'logs');
+    if (activeTab === 'logs' && !canViewLogs) setActiveTab(canManageDevices ? 'devices' : canViewReports ? 'reports' : 'rooms');
+    if (activeTab === 'permissions' && !canManageAccounts) setActiveTab(canManageDevices ? 'devices' : canViewReports ? 'reports' : 'logs');
+  }, [activeTab, canManageAccounts, canManageDevices, canSeeRoomsTab, canViewLogs, canViewReports]);
+
   const loadUsersData = async () => {
     try {
       setUsersLoading(true);
@@ -158,14 +191,16 @@ export const AdminDashboardPage: React.FC = () => {
     const buildingsRequest = loadBuildingsData();
     try {
       setLoading(true);
-      const [reportsData, devicesData, roomsData, catData, logsData] = await Promise.all([
+      const [reportsData, ownReportsData, devicesData, roomsData, catData, logsData] = await Promise.all([
         ApiService.getIncidentReports(),
+        isReporter ? ApiService.getMyIncidentReports() : Promise.resolve([] as IncidentReport[]),
         ApiService.getDevices(),
         ApiService.getRooms(),
         ApiService.getCategories(),
         ApiService.getMaintenanceLogs()
       ]);
       setReports(reportsData);
+      setMySubmittedReports(ownReportsData);
       setDevices(devicesData);
       setRooms(roomsData);
       setCategories(catData);
@@ -191,15 +226,35 @@ export const AdminDashboardPage: React.FC = () => {
     }));
   };
 
-  const handleChangeUserRole = (userId: number, newRole: RoleName) => {
-    setUsersList(prev => prev.map(u => {
-      if (u.id !== userId) return u;
-      return { 
-        ...u, 
-        role_name: newRole,
-        permissions: DEFAULT_ROLE_PERMISSIONS[newRole] || []
-      };
-    }));
+  const handleChangeUserRole = async (userId: number, newRole: RoleName) => {
+    const previousUser = usersList.find(u => u.id === userId);
+    if (!previousUser || previousUser.role_name === newRole) return;
+
+    // Khi đổi vai trò, quyền mặc định của vai trò đó được áp dụng và lưu ngay.
+    const nextPermissions = [...(DEFAULT_ROLE_PERMISSIONS[newRole] || [])];
+    setUsersList(prev => prev.map(u => u.id === userId
+      ? { ...u, role_name: newRole, permissions: nextPermissions }
+      : u
+    ));
+    setSavingRoleUserId(userId);
+    setUserMsg({ id: userId, text: 'Đang áp dụng quyền theo vai trò...' });
+
+    try {
+      const savedUser = await ApiService.updateUserPermissions(userId, nextPermissions, newRole);
+      setUsersList(prev => prev.map(u => u.id === userId ? savedUser : u));
+      if (currentUser?.id === userId) await refreshUser();
+      setUserMsg({ id: userId, text: 'Đã lưu vai trò và quyền mặc định.' });
+      setTimeout(() => setUserMsg(null), 3000);
+    } catch (err: any) {
+      setUsersList(prev => prev.map(u => u.id === userId ? previousUser : u));
+      setUserMsg({
+        id: userId,
+        text: err.response?.data?.message || 'Không thể cập nhật vai trò.',
+        error: true
+      });
+    } finally {
+      setSavingRoleUserId(null);
+    }
   };
 
   const handleSaveUserPermissions = async (u: User) => {
@@ -571,6 +626,17 @@ export const AdminDashboardPage: React.FC = () => {
     }));
   };
 
+  const handleMoveRoomOnFloorPlan = async (room: Room, position: Pick<Room, 'x' | 'y' | 'width' | 'height' | 'door_x' | 'door_y'>) => {
+    const previousRoom = rooms.find(item => item.id === room.id);
+    setRooms(previous => previous.map(item => item.id === room.id ? { ...item, ...position } : item));
+    try {
+      await ApiService.updateRoom(room.id, position);
+    } catch (error: any) {
+      if (previousRoom) setRooms(previous => previous.map(item => item.id === room.id ? previousRoom : item));
+      window.alert(error.response?.data?.message || 'Không thể lưu vị trí phòng. Vui lòng thử lại.');
+    }
+  };
+
   const handleDeleteRoom = async (room: Room) => {
     if (!window.confirm(`Xóa phòng ${room.room_number} (${room.name})?`)) return;
     try {
@@ -596,6 +662,76 @@ export const AdminDashboardPage: React.FC = () => {
     }
   };
 
+  const matchesSearch = (value: unknown, term: string) => String(value || '').toLowerCase().includes(term.trim().toLowerCase());
+  const filteredDevices = devices.filter(device => !deviceSearch.trim() || [device.device_code, device.name, device.model, device.room_name, device.category_name, device.qr_code].some(value => matchesSearch(value, deviceSearch)));
+  const filteredBuildingsAdmin = buildings.filter(building => !buildingSearch.trim() || [building.building_code, building.name, building.description].some(value => matchesSearch(value, buildingSearch)));
+  const filteredRoomsAdmin = rooms.filter(room => !roomSearch.trim() || [room.room_number, room.name, room.building_code, buildings.find(building => building.id === room.building_id)?.name].some(value => matchesSearch(value, roomSearch)));
+
+  const devicesPerPage = 14;
+  const deviceTotalPages = Math.max(1, Math.ceil(filteredDevices.length / devicesPerPage));
+  const currentDevicePage = Math.min(devicePage, deviceTotalPages);
+  const displayedDevices = filteredDevices.slice(
+    (currentDevicePage - 1) * devicesPerPage,
+    currentDevicePage * devicesPerPage
+  );
+  const deviceFirstItem = filteredDevices.length === 0 ? 0 : (currentDevicePage - 1) * devicesPerPage + 1;
+  const deviceLastItem = Math.min(currentDevicePage * devicesPerPage, filteredDevices.length);
+
+  const buildingsPerPage = 14;
+  const buildingTotalPages = Math.max(1, Math.ceil(filteredBuildingsAdmin.length / buildingsPerPage));
+  const currentBuildingPage = Math.min(buildingPage, buildingTotalPages);
+  const displayedBuildings = filteredBuildingsAdmin.slice(
+    (currentBuildingPage - 1) * buildingsPerPage,
+    currentBuildingPage * buildingsPerPage
+  );
+
+  const roomsPerPage = 14;
+  const roomTotalPages = Math.max(1, Math.ceil(filteredRoomsAdmin.length / roomsPerPage));
+  const currentRoomPage = Math.min(roomPage, roomTotalPages);
+  const displayedRooms = filteredRoomsAdmin.slice(
+    (currentRoomPage - 1) * roomsPerPage,
+    currentRoomPage * roomsPerPage
+  );
+
+  const activeReportList = isReporter && reportListView === 'mine' ? mySubmittedReports : reports;
+  const filteredReports = activeReportList.filter(report => !reportSearch.trim() || [report.report_code, report.title, report.description, report.room_name, report.device_name, report.reporter_name].some(value => matchesSearch(value, reportSearch)));
+  const filteredLogs = logs.filter(log => !logSearch.trim() || [log.device_name, log.technician_name, log.action_taken, log.note].some(value => matchesSearch(value, logSearch)));
+  const filteredUsers = usersList.filter(user => !userSearch.trim() || [user.full_name, user.username, user.email, user.phone, user.role_name].some(value => matchesSearch(value, userSearch)));
+
+  const reportTotalPages = Math.max(1, Math.ceil(filteredReports.length / 14));
+  const currentReportPage = Math.min(reportPage, reportTotalPages);
+  const displayedReports = filteredReports.slice((currentReportPage - 1) * 14, currentReportPage * 14);
+  const logTotalPages = Math.max(1, Math.ceil(filteredLogs.length / 14));
+  const currentLogPage = Math.min(logPage, logTotalPages);
+  const displayedLogs = filteredLogs.slice((currentLogPage - 1) * 14, currentLogPage * 14);
+  const userTotalPages = Math.max(1, Math.ceil(filteredUsers.length / 14));
+  const currentUserPage = Math.min(userPage, userTotalPages);
+  const displayedUsers = filteredUsers.slice((currentUserPage - 1) * 14, currentUserPage * 14);
+
+  const renderPagination = (totalItems: number, currentPage: number, totalPages: number, onChange: (page: number) => void, label: string) => {
+    if (totalItems === 0) return null;
+    const first = (currentPage - 1) * 14 + 1;
+    const last = Math.min(currentPage * 14, totalItems);
+    const pages = Array.from({ length: totalPages }, (_, index) => index + 1)
+      .filter(page => page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1);
+
+    return (
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
+        <p className="text-xs text-slate-500">Hiển thị <strong className="text-slate-700">{first}–{last}</strong> / {totalItems} {label}</p>
+        <div className="flex items-center gap-1.5">
+          <button type="button" onClick={() => onChange(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">Trước</button>
+          {pages.map((page, index) => (
+            <React.Fragment key={page}>
+              {index > 0 && page - pages[index - 1] > 1 && <span className="px-1 text-xs text-slate-400">…</span>}
+              <button type="button" onClick={() => onChange(page)} className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-bold ${page === currentPage ? 'bg-sky-600 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{page}</button>
+            </React.Fragment>
+          ))}
+          <button type="button" onClick={() => onChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">Sau</button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-8 pb-20 md:pb-12">
       {/* Header */}
@@ -608,21 +744,11 @@ export const AdminDashboardPage: React.FC = () => {
           <p className="text-slate-500 text-sm">Xử lý báo hỏng, theo dõi bảo trì và quản lý vòng đời thiết bị trường học</p>
         </div>
 
-        <button
-          onClick={() => {
-            setDeviceModal({ mode: 'create' });
-            setShowAddDeviceModal(true);
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-600/30 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Thêm Thiết Bị Mới</span>
-        </button>
       </div>
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200">
-        <button
+        {canViewReports && <button
           onClick={() => setActiveTab('reports')}
           className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
             activeTab === 'reports'
@@ -631,10 +757,10 @@ export const AdminDashboardPage: React.FC = () => {
           }`}
         >
           <AlertTriangle className="w-4 h-4" />
-          <span>Phiếu Báo Hỏng Cần Xử Lý ({reports.filter(r => r.status !== 'RESOLVED').length})</span>
-        </button>
+          <span>{isReporter ? 'Theo Dõi Sự Cố' : `Phiếu Báo Hỏng Cần Xử Lý (${reports.filter(r => r.status !== 'RESOLVED').length})`}</span>
+        </button>}
 
-        <button
+        {canManageDevices && <button
           onClick={() => setActiveTab('devices')}
           className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
             activeTab === 'devices'
@@ -643,8 +769,8 @@ export const AdminDashboardPage: React.FC = () => {
           }`}
         >
           <Cpu className="w-4 h-4" />
-          <span>Danh Sách Thiết Bị ({devices.length})</span>
-        </button>
+          <span>Quản lý thiết bị ({devices.length})</span>
+        </button>}
 
         {canSeeRoomsTab && (
           <button
@@ -660,7 +786,7 @@ export const AdminDashboardPage: React.FC = () => {
           </button>
         )}
 
-        <button
+        {canViewLogs && <button
           onClick={() => setActiveTab('logs')}
           className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
             activeTab === 'logs'
@@ -670,34 +796,56 @@ export const AdminDashboardPage: React.FC = () => {
         >
           <Wrench className="w-4 h-4" />
           <span>Nhật Ký Bảo Trì ({logs.length})</span>
-        </button>
+        </button>}
 
-        <button
-          onClick={() => {
-            setActiveTab('permissions');
-            loadUsersData();
-          }}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
-            activeTab === 'permissions'
-              ? 'border-sky-600 text-sky-600'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          <span>Cấp Quyền & RBAC ({usersList.length || 4})</span>
-        </button>
+        {canManageAccounts && (
+          <button
+            onClick={() => {
+              setActiveTab('permissions');
+              loadUsersData();
+            }}
+            className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
+              activeTab === 'permissions'
+                ? 'border-sky-600 text-sky-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>Cấp Quyền & RBAC ({usersList.length || 4})</span>
+          </button>
+        )}
       </div>
 
       {/* Tab Content 1: Reports Management */}
-      {activeTab === 'reports' && (
+      {activeTab === 'reports' && canViewReports && (
         <div className="space-y-4">
-          {reports.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-rose-600" />{isReporter ? 'Theo dõi tình trạng thiết bị hư hỏng' : 'Quản lý phiếu báo hỏng'}</h2>
+              <p className="text-xs text-slate-500 mt-1">{isReporter ? 'Xem sự cố mới nhất và tiến trình các phiếu do bạn gửi. Chỉ KTV/Admin mới được cập nhật.' : 'Tìm theo mã phiếu, phòng, thiết bị hoặc người báo.'}</p>
+            </div>
+            <label className="relative w-full sm:w-80">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input value={reportSearch} onChange={e => { setReportSearch(e.target.value); setReportPage(1); }} placeholder="Tìm phiếu báo hỏng..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+            </label>
+          </div>
+          {isReporter && (
+            <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+              <button type="button" onClick={() => { setReportListView('all'); setReportPage(1); }} className={`rounded-xl px-4 py-2.5 text-xs font-extrabold transition-colors ${reportListView === 'all' ? 'bg-sky-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                Toàn bộ thiết bị hư hỏng ({reports.length})
+              </button>
+              <button type="button" onClick={() => { setReportListView('mine'); setReportPage(1); }} className={`rounded-xl px-4 py-2.5 text-xs font-extrabold transition-colors ${reportListView === 'mine' ? 'bg-sky-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                Phiếu tôi đã gửi ({mySubmittedReports.length})
+              </button>
+            </div>
+          )}
+          {filteredReports.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
-              Hiện không có phiếu báo hỏng nào.
+              {activeReportList.length === 0 ? 'Hiện không có phiếu báo hỏng nào.' : 'Không tìm thấy phiếu báo hỏng phù hợp.'}
             </div>
           ) : (
             <div className="space-y-4">
-              {reports.map(report => (
+              {displayedReports.map(report => (
                 <div
                   key={report.id}
                   className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6"
@@ -719,10 +867,34 @@ export const AdminDashboardPage: React.FC = () => {
                       {report.description}
                     </p>
 
+                    {(report.image_urls || []).length > 0 && (
+                      <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-3">
+                        <p className="mb-2 text-[11px] font-extrabold text-sky-800">Ảnh minh chứng sự cố</p>
+                        <div className="flex flex-wrap gap-2">
+                          {report.image_urls.filter(Boolean).map((imageUrl, index) => (
+                            <button
+                              key={`${report.id}-${imageUrl}`}
+                              type="button"
+                              onClick={() => setSelectedReportImage({ url: imageUrl, reportCode: report.report_code })}
+                              className="group relative h-20 w-28 overflow-hidden rounded-lg border border-sky-200 bg-white text-left shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                              title="Bấm để xem ảnh lớn"
+                            >
+                              <img
+                                src={imageUrl}
+                                alt={`Ảnh sự cố ${index + 1} của ${report.report_code}`}
+                                className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                              />
+                              <span className="absolute inset-x-0 bottom-0 bg-slate-950/60 py-0.5 text-center text-[10px] font-bold text-white">Xem ảnh</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-1">
                       <span>📍 Phòng: <strong className="text-slate-800">{report.room_name}</strong></span>
                       <span>⚙️ Thiết bị: <strong className="text-slate-800">{report.device_name || 'Phòng'}</strong></span>
-                      <span>👤 Người báo: <strong className="text-slate-800">{report.reporter_name} ({report.reporter_phone})</strong></span>
+                      {!isReporter && <span>👤 Người báo: <strong className="text-slate-800">{report.reporter_name} ({report.reporter_phone})</strong></span>}
                     </div>
 
                     {report.solution_note && (
@@ -733,7 +905,7 @@ export const AdminDashboardPage: React.FC = () => {
                   </div>
 
                   <div className="shrink-0 flex sm:flex-col gap-2">
-                    <button
+                    {canResolveReports && <button
                       onClick={() => {
                         setSelectedReport(report);
                         setNewStatus(report.status === 'RESOLVED' ? 'RESOLVED' : 'IN_PROGRESS');
@@ -742,19 +914,40 @@ export const AdminDashboardPage: React.FC = () => {
                       className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm transition-all"
                     >
                       Cập nhật tiến độ
-                    </button>
+                    </button>}
                   </div>
                 </div>
               ))}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+                {renderPagination(filteredReports.length, currentReportPage, reportTotalPages, setReportPage, 'phiếu báo hỏng')}
+              </div>
             </div>
           )}
         </div>
       )}
 
       {/* Tab Content 2: Devices Table */}
-      {activeTab === 'devices' && (
-        <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+      {activeTab === 'devices' && canManageDevices && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <Cpu className="w-5 h-5 text-sky-600" />
+                <span>Quản lý thiết bị</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">Danh sách thiết bị, vị trí phòng, mã QR và trạng thái sử dụng.</p>
+            </div>
+            <div className="flex w-full sm:w-auto flex-col sm:flex-row gap-2">
+              <label className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input value={deviceSearch} onChange={e => { setDeviceSearch(e.target.value); setDevicePage(1); }} placeholder="Tìm thiết bị, phòng, mã QR..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+              </label>
+              {canManageDevices && <button type="button" onClick={() => { setDeviceModal({ mode: 'create' }); setShowAddDeviceModal(true); }} className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-600/30 transition-all"><Plus className="w-4 h-4" /><span>Thêm thiết bị</span></button>}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
                 <tr>
@@ -764,11 +957,11 @@ export const AdminDashboardPage: React.FC = () => {
                   <th className="px-5 py-4">Danh Mục</th>
                   <th className="px-5 py-4">Trạng Thái</th>
                   <th className="px-5 py-4 text-right">Mã QR</th>
-                  {hasPermission('MANAGE_DEVICES') && <th className="px-5 py-4 text-right">Thao tác</th>}
+                  {canManageDevices && <th className="px-5 py-4 text-right">Thao tác</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {devices.map(dev => (
+                {displayedDevices.map(dev => (
                   <tr key={dev.id} className="hover:bg-slate-50/50">
                     <td className="px-5 py-4 font-mono font-bold text-sky-700">{dev.device_code}</td>
                     <td className="px-5 py-4">
@@ -783,7 +976,7 @@ export const AdminDashboardPage: React.FC = () => {
                     <td className="px-5 py-4 text-right font-mono text-[11px] text-slate-500">
                       {dev.qr_code}
                     </td>
-                    {hasPermission('MANAGE_DEVICES') && (
+                    {canManageDevices && (
                       <td className="px-5 py-4 text-right whitespace-nowrap">
                         <button type="button" onClick={() => openEditDevice(dev)} title="Sửa thiết bị" className="inline-flex p-2 rounded-lg text-sky-700 hover:bg-sky-50">
                           <Pencil className="w-4 h-4" />
@@ -797,6 +990,48 @@ export const AdminDashboardPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            </div>
+            {devices.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
+                <p className="text-xs text-slate-500">
+                  Hiển thị <strong className="text-slate-700">{deviceFirstItem}–{deviceLastItem}</strong> / {filteredDevices.length} thiết bị
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setDevicePage(page => Math.max(1, page - 1))}
+                    disabled={currentDevicePage === 1}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Trước
+                  </button>
+                  {Array.from({ length: deviceTotalPages }, (_, index) => index + 1)
+                    .filter(page => page === 1 || page === deviceTotalPages || Math.abs(page - currentDevicePage) <= 1)
+                    .map((page, index, pages) => (
+                      <React.Fragment key={page}>
+                        {index > 0 && page - pages[index - 1] > 1 && <span className="px-1 text-xs text-slate-400">…</span>}
+                        <button
+                          type="button"
+                          onClick={() => setDevicePage(page)}
+                          className={`min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-bold ${
+                            page === currentDevicePage ? 'bg-sky-600 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      </React.Fragment>
+                    ))}
+                  <button
+                    type="button"
+                    onClick={() => setDevicePage(page => Math.min(deviceTotalPages, page + 1))}
+                    disabled={currentDevicePage === deviceTotalPages}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Sau
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -804,40 +1039,79 @@ export const AdminDashboardPage: React.FC = () => {
       {/* Tab Content 3: Room Management */}
       {activeTab === 'rooms' && (
         <div className="space-y-4">
-          <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-sky-600" />
-                <span>Quản lý Phòng & Vị trí</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">Thêm, sửa, xóa phòng và gắn vị trí tầng, toạ độ, loại phòng và thiết bị trong phòng.</p>
+          <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 rounded-2xl bg-slate-100 p-1.5 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setManagementSection('buildings')}
+                className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+                  managementSection === 'buildings' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
+                Quản lý tòa ({buildings.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setManagementSection('rooms')}
+                className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+                  managementSection === 'rooms' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
+                Quản lý phòng ({rooms.length})
+              </button>
             </div>
-               {canManageRoomCrud && (
-              <div className="flex items-center gap-2">
+            <div className="flex w-full sm:w-auto flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              {managementSection === 'buildings' ? (
+                <label className="relative w-full sm:w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input value={buildingSearch} onChange={e => { setBuildingSearch(e.target.value); setBuildingPage(1); }} placeholder="Tìm mã tòa, tên tòa..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+                </label>
+              ) : (
+                <label className="relative w-full sm:w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input value={roomSearch} onChange={e => { setRoomSearch(e.target.value); setRoomPage(1); }} placeholder="Tìm mã phòng, tên phòng, tòa..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+                </label>
+              )}
+              {canManageRoomCrud && (
                 <button
                   type="button"
-                  onClick={openCreateBuilding}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all"
-                >
-                  <Building2 className="w-4 h-4" />
-                  <span>Thêm tòa</span>
-                </button>
-                <button type="button" onClick={() => setShowBuildingManager(true)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 font-bold text-xs shadow-sm transition-all">
-                  <Building2 className="w-4 h-4" />
-                  <span>Quản lý tòa</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={openCreateRoom}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md transition-all"
+                  onClick={managementSection === 'buildings' ? openCreateBuilding : openCreateRoom}
+                  className={`inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-white font-bold text-xs shadow-md transition-all ${
+                    managementSection === 'buildings' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-sky-600 hover:bg-sky-700'
+                  }`}
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Thêm phòng</span>
+                  <span>{managementSection === 'buildings' ? 'Thêm tòa' : 'Thêm phòng'}</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-
+          {managementSection === 'buildings' ? (
+            <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="border-b border-slate-100 px-5 py-4">
+                <h2 className="font-extrabold text-slate-900">Danh sách tòa / dãy</h2>
+                <p className="mt-1 text-xs text-slate-500">Sửa thông tin, số tầng, vị trí hoặc xóa tòa nhà.</p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {displayedBuildings.map(building => (
+                  <div key={building.id} className="flex items-center gap-3 px-5 py-4 hover:bg-slate-50/60">
+                    <span className="rounded-xl px-2.5 py-1.5 text-xs font-black text-white" style={{ backgroundColor: building.color || '#2563eb' }}>{building.building_code}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-sm text-slate-900">{building.name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{building.floors} tầng · {rooms.filter(room => room.building_id === building.id).length} phòng</p>
+                    </div>
+                    {canManageRoomCrud && <div className="flex items-center gap-1">
+                      <button type="button" onClick={() => openEditBuilding(building)} title="Sửa tòa" className="inline-flex p-2 rounded-lg text-sky-700 hover:bg-sky-50"><Pencil className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => handleDeleteBuilding(building)} title="Xóa tòa" className="inline-flex p-2 rounded-lg text-rose-600 hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button>
+                    </div>}
+                  </div>
+                ))}
+              </div>
+              {renderPagination(filteredBuildingsAdmin.length, currentBuildingPage, buildingTotalPages, setBuildingPage, 'tòa / dãy')}
+            </div>
+          ) : (
           <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600">
@@ -855,7 +1129,7 @@ export const AdminDashboardPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {rooms.map(room => {
+                  {displayedRooms.map(room => {
                     const roomBuilding = buildings.find(b => b.id === room.building_id);
                     const roomDevices = devices.filter(d => d.room_id === room.id);
 
@@ -911,14 +1185,26 @@ export const AdminDashboardPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            {renderPagination(filteredRoomsAdmin.length, currentRoomPage, roomTotalPages, setRoomPage, 'phòng')}
           </div>
+          )}
         </div>
       )}
 
       {/* Tab Content 4: Maintenance Logs */}
-      {activeTab === 'logs' && (
+      {activeTab === 'logs' && canViewLogs && (
         <div className="space-y-4">
-          {logs.map(log => (
+          <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2"><Wrench className="w-5 h-5 text-sky-600" />Nhật ký bảo trì</h2>
+              <p className="text-xs text-slate-500 mt-1">Tìm theo thiết bị, kỹ thuật viên hoặc nội dung xử lý.</p>
+            </div>
+            <label className="relative w-full sm:w-80">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input value={logSearch} onChange={e => { setLogSearch(e.target.value); setLogPage(1); }} placeholder="Tìm nhật ký bảo trì..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+            </label>
+          </div>
+          {displayedLogs.map(log => (
             <div key={log.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span className="font-bold text-slate-800">KTV Phụ trách: {log.technician_name}</span>
@@ -933,6 +1219,8 @@ export const AdminDashboardPage: React.FC = () => {
               )}
             </div>
           ))}
+          {filteredLogs.length === 0 && <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">Không tìm thấy nhật ký bảo trì phù hợp.</div>}
+          {filteredLogs.length > 0 && <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">{renderPagination(filteredLogs.length, currentLogPage, logTotalPages, setLogPage, 'nhật ký')}</div>}
         </div>
       )}
 
@@ -950,23 +1238,14 @@ export const AdminDashboardPage: React.FC = () => {
               </p>
             </div>
 
-            <button
-              onClick={loadUsersData}
-              disabled={usersLoading}
-              className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-2 transition-all cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} />
-              <span>Làm mới danh sách</span>
-            </button>
-            {hasPermission('GRANT_PERMISSIONS') && (
-              <button
-                onClick={openCreateUser}
-                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-2 transition-all"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Thêm kỹ thuật viên</span>
-              </button>
-            )}
+            <div className="flex w-full sm:w-auto flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <label className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input value={userSearch} onChange={e => { setUserSearch(e.target.value); setUserPage(1); }} placeholder="Tìm tài khoản..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+              </label>
+              <button onClick={loadUsersData} disabled={usersLoading} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /><span>Làm mới</span></button>
+              {canManageAccounts && <button onClick={openCreateUser} className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all"><UserPlus className="w-3.5 h-3.5" /><span>Thêm KTV</span></button>}
+            </div>
           </div>
 
           <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
@@ -981,7 +1260,7 @@ export const AdminDashboardPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {usersList.map(u => {
+                  {displayedUsers.map(u => {
                     const isSaving = userMsg?.id === u.id;
                     const isSuccess = isSaving && !userMsg?.error;
                     const isError = isSaving && userMsg?.error;
@@ -1001,7 +1280,8 @@ export const AdminDashboardPage: React.FC = () => {
                           <select
                             value={u.role_name}
                             onChange={e => handleChangeUserRole(u.id, e.target.value as RoleName)}
-                            className="px-3 py-1.5 rounded-xl border border-slate-200 font-bold text-xs bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm"
+                            disabled={!canManageAccounts || savingRoleUserId === u.id}
+                            className="px-3 py-1.5 rounded-xl border border-slate-200 font-bold text-xs bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm disabled:cursor-wait disabled:opacity-60"
                           >
                             <option value="ADMIN">Quản Trị Viên (Admin)</option>
                             <option value="TECHNICIAN">Kỹ Thuật Viên (KTV)</option>
@@ -1021,6 +1301,14 @@ export const AdminDashboardPage: React.FC = () => {
                               {u.role_name}
                             </span>
                           </div>
+                          {savingRoleUserId === u.id && (
+                            <p className="mt-1 text-[10px] font-bold text-sky-600">Đang lưu quyền...</p>
+                          )}
+                          {savingRoleUserId !== u.id && userMsg?.id === u.id && (
+                            <p className={`mt-1 text-[10px] font-bold ${userMsg.error ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {userMsg.text}
+                            </p>
+                          )}
                         </td>
 
                         {/* Permissions Checkbox Matrix */}
@@ -1042,7 +1330,7 @@ export const AdminDashboardPage: React.FC = () => {
                                   <input
                                     type="checkbox"
                                     checked={checked}
-                                    disabled={isDisabled}
+                                  disabled={!canManageAccounts || isDisabled}
                                     onChange={() => handleTogglePermission(u.id, perm)}
                                     className="w-3.5 h-3.5 text-sky-600 rounded border-slate-300 focus:ring-sky-500"
                                   />
@@ -1058,13 +1346,14 @@ export const AdminDashboardPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleSaveUserPermissions(u)}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm shadow-sky-600/25 transition-all cursor-pointer"
+                            disabled={!canManageAccounts}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm shadow-sky-600/25 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Save className="w-3.5 h-3.5" />
                             <span>Lưu quyền</span>
                           </button>
 
-                          {hasPermission('GRANT_PERMISSIONS') && (
+                          {canManageAccounts && (
                             <div className="flex justify-end gap-1 mt-2">
                               <button type="button" onClick={() => openEditUser(u)} title="Sửa tài khoản" className="p-1.5 rounded-lg text-sky-700 hover:bg-sky-50">
                                 <Pencil className="w-3.5 h-3.5" />
@@ -1087,6 +1376,7 @@ export const AdminDashboardPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            {filteredUsers.length > 0 && renderPagination(filteredUsers.length, currentUserPage, userTotalPages, setUserPage, 'tài khoản')}
           </div>
         </div>
       )}
@@ -1459,6 +1749,8 @@ export const AdminDashboardPage: React.FC = () => {
                       selectedRoom={null}
                       onSelectRoom={() => null}
                       onMapClick={handleFloorMapPick}
+                      editable={canManageRoomCrud}
+                      onMoveRoom={handleMoveRoomOnFloorPlan}
                     />
                   </div>
                 ) : (
@@ -1553,6 +1845,16 @@ export const AdminDashboardPage: React.FC = () => {
               </div>
               <button type="submit" className="w-full py-2.5 rounded-xl bg-sky-600 text-white font-bold text-xs hover:bg-sky-700">Lưu tài khoản</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {selectedReportImage && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4" onClick={() => setSelectedReportImage(null)}>
+          <div className="relative max-h-full max-w-5xl" onClick={event => event.stopPropagation()}>
+            <button type="button" onClick={() => setSelectedReportImage(null)} className="absolute -right-2 -top-2 z-10 rounded-full bg-white p-2 text-slate-700 shadow-lg hover:bg-slate-100" title="Đóng ảnh"><X className="h-5 w-5" /></button>
+            <img src={selectedReportImage.url} alt={`Ảnh minh chứng ${selectedReportImage.reportCode}`} className="max-h-[85vh] max-w-full rounded-2xl bg-white object-contain shadow-2xl" />
+            <p className="mt-2 text-center text-xs font-bold text-white">Ảnh minh chứng — {selectedReportImage.reportCode}</p>
           </div>
         </div>
       )}

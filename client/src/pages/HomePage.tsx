@@ -15,7 +15,9 @@ import {
   Wind,
   Navigation,
   Compass,
-  ChevronDown
+  ChevronDown,
+  Move,
+  ExternalLink
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { Building, Room, DashboardStats, CampusPOI } from '../types';
@@ -24,12 +26,15 @@ import { LeafletCampusMap } from '../components/LeafletCampusMap';
 import { FloorPlanMap } from '../components/FloorPlanMap';
 import { RoutePlannerModal } from '../components/RoutePlannerModal';
 import { PathfindingService, RouteResult } from '../services/pathfinding';
+import { useAuth } from '../context/AuthContext';
 
 interface HomePageProps {
   isTechnicianMode?: boolean;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role_name === 'ADMIN';
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [pois, setPois] = useState<CampusPOI[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -43,6 +48,8 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
   const [expandedBuildingIds, setExpandedBuildingIds] = useState<Set<number>>(() => new Set());
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
+  const [isLocatingForRoute, setIsLocatingForRoute] = useState(false);
+  const [layoutEditMode, setLayoutEditMode] = useState(false);
 
   // Navigation & Route Planner
   const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
@@ -97,29 +104,42 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
     setViewMode('leaflet');
   };
 
+  const getRoomDestination = (room: Room): [number, number] | null => {
+    if (Number.isFinite(room.latitude) && Number.isFinite(room.longitude)) {
+      return [Number(room.latitude), Number(room.longitude)];
+    }
+    const building = buildings.find(item => item.id === room.building_id);
+    if (building && Number.isFinite(building.latitude) && Number.isFinite(building.longitude)) {
+      return [Number(building.latitude), Number(building.longitude)];
+    }
+    return null;
+  };
+
+  const openGoogleMapsDirections = (room: Room | null = selectedRoom, location: [number, number] | null = userLocation) => {
+    if (!room) return;
+    const destination = getRoomDestination(room);
+    if (!destination) {
+      window.alert('Phòng này chưa có tọa độ bản đồ để mở chỉ đường.');
+      return;
+    }
+    const origin = location ? `&origin=${location[0]},${location[1]}` : '';
+    const url = `https://www.google.com/maps/dir/?api=1${origin}&destination=${destination[0]},${destination[1]}&travelmode=walking`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const handleStartNavigateToRoom = (room: Room) => {
     if (!room) return;
     const route = PathfindingService_fallback(room);
     setActiveRoute(route);
     const gateCoordinates: [number, number] = [10.9822, 106.6742];
-    const buildingCoordinates: Record<number, [number, number]> = {
-      1: [10.9808, 106.6740],
-      2: [10.9814, 106.6750],
-      3: [10.9798, 106.6747]
-    };
-    const destination = buildingCoordinates[room.building_id];
+    const destination = getRoomDestination(room);
     setRouteCoordinates(destination ? [gateCoordinates, destination] : []);
     setSelectedRoom(room);
     setViewMode('leaflet');
   };
 
-  const handleNavigateFromCurrentLocation = async (room: Room, location: { latitude: number; longitude: number }) => {
-    const buildingCoordinates: Record<number, [number, number]> = {
-      1: [10.9808, 106.6740],
-      2: [10.9814, 106.6750],
-      3: [10.9798, 106.6747]
-    };
-    const destination = buildingCoordinates[room.building_id];
+  const handleNavigateFromCurrentLocation = (room: Room, location: { latitude: number; longitude: number }) => {
+    const destination = getRoomDestination(room);
     if (!destination) return;
 
     setUserLocation([location.latitude, location.longitude]);
@@ -127,38 +147,44 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
     setSelectedBuildingId(room.building_id);
     setViewMode('leaflet');
 
-    const gates = [
-      { id: 'POI-GATE-1', latitude: 10.9822, longitude: 106.6742 },
-      { id: 'POI-GATE-2', latitude: 10.9802, longitude: 106.6762 }
-    ];
-    const nearestGate = gates.reduce((closest, gate) => {
-      const distance = Math.hypot(location.latitude - gate.latitude, location.longitude - gate.longitude);
-      const closestDistance = Math.hypot(location.latitude - closest.latitude, location.longitude - closest.longitude);
-      return distance < closestDistance ? gate : closest;
+    // Không tự vẽ đường nội khu bằng tọa độ ước lượng vì có thể cắt qua tòa nhà.
+    setRouteCoordinates([]);
+    setActiveRoute({
+      fromName: 'Vị trí hiện tại của bạn',
+      toName: room.room_number,
+      totalDistanceMeters: 0,
+      estimatedMinutes: 0,
+      steps: [{ instruction: 'Đã mở Google Maps với chế độ đi bộ để chỉ đúng lối đi thực tế.', distanceMeters: 0, icon: 'walk' }],
+      campusPoints: [],
+      floorPoints: []
     });
+    openGoogleMapsDirections(room, [location.latitude, location.longitude]);
+  };
 
-    try {
-      const response = await fetch(`https://router.project-osrm.org/route/v1/foot/${location.longitude},${location.latitude};${destination[1]},${destination[0]}?overview=full&geometries=geojson`);
-      if (!response.ok) throw new Error('Routing service unavailable');
-      const data = await response.json();
-      const routeData = data.routes?.[0];
-      if (!routeData) throw new Error('No route found');
-
-      setRouteCoordinates(routeData.geometry.coordinates.map(([longitude, latitude]: [number, number]) => [latitude, longitude]));
-      setActiveRoute({
-        fromName: 'Vị trí hiện tại của bạn',
-        toName: room.room_number,
-        totalDistanceMeters: Math.round(routeData.distance),
-        estimatedMinutes: Math.max(1, Math.ceil(routeData.duration / 60)),
-        steps: [{ instruction: `Đi theo tuyến đường ngắn nhất đến Tòa ${room.building_code || room.building_id}, sau đó lên Tầng ${room.floor} đến ${room.room_number}.`, distanceMeters: Math.round(routeData.distance), icon: 'walk' }],
-        campusPoints: [],
-        floorPoints: []
-      });
-    } catch {
-      const route = PathfindingService.findRoute(nearestGate.id, `ROOM-${room.id}`);
-      setRouteCoordinates([[location.latitude, location.longitude], destination]);
-      setActiveRoute({ ...route, fromName: `Vị trí hiện tại (gần ${nearestGate.id === 'POI-GATE-1' ? 'Cổng 1' : 'Cổng 2'})` });
+  const handleNavigateSelectedRoom = () => {
+    if (!selectedRoom) {
+      window.alert('Hãy chọn một phòng trong danh sách bên trái trước khi chỉ đường.');
+      return;
     }
+    if (!navigator.geolocation) {
+      window.alert('Trình duyệt không hỗ trợ định vị.');
+      return;
+    }
+    setIsLocatingForRoute(true);
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        setIsLocatingForRoute(false);
+        void handleNavigateFromCurrentLocation(selectedRoom, {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+      },
+      () => {
+        setIsLocatingForRoute(false);
+        window.alert('Không lấy được vị trí. Hãy cho phép quyền vị trí trong trình duyệt rồi thử lại.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    );
   };
 
   const handleSelectRoom = (room: Room) => {
@@ -167,6 +193,21 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
     setExpandedBuildingIds(previous => new Set([...previous, room.building_id]));
     setSelectedFloor(room.floor);
     setViewMode('leaflet');
+  };
+
+  const handleMoveRoom = async (room: Room, position: Pick<Room, 'x' | 'y' | 'width' | 'height' | 'door_x' | 'door_y'>) => {
+    const previousRoom = rooms.find(item => item.id === room.id);
+    setRooms(previous => previous.map(item => item.id === room.id ? { ...item, ...position } : item));
+    setSelectedRoom(previous => previous?.id === room.id ? { ...previous, ...position } : previous);
+    try {
+      await ApiService.updateRoom(room.id, position);
+    } catch (error) {
+      if (previousRoom) {
+        setRooms(previous => previous.map(item => item.id === room.id ? previousRoom : item));
+        setSelectedRoom(previous => previous?.id === room.id ? previousRoom : previous);
+      }
+      window.alert('Không thể lưu vị trí phòng. Vui lòng thử lại.');
+    }
   };
 
   const PathfindingService_fallback = (room: Room): RouteResult => {
@@ -272,9 +313,8 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             </div>
             <div className="space-y-0.5">
               <div className="flex items-center gap-2 text-xs font-bold text-sky-800">
-                <span>Đang hiển thị lộ trình chỉ đường</span>
-                <span>•</span>
-                <span>{activeRoute.totalDistanceMeters}m (~{activeRoute.estimatedMinutes} phút đi bộ)</span>
+                <span>{activeRoute.totalDistanceMeters > 0 ? 'Đang hiển thị lộ trình chỉ đường' : 'Đang dùng chỉ đường Google Maps'}</span>
+                {activeRoute.totalDistanceMeters > 0 && <><span>•</span><span>{activeRoute.totalDistanceMeters}m (~{activeRoute.estimatedMinutes} phút đi bộ)</span></>}
               </div>
               <p className="text-sm font-extrabold text-slate-900">
                 {activeRoute.fromName} <span className="text-sky-600 font-bold">➔</span> {activeRoute.toName}
@@ -290,8 +330,17 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             >
               Xem chi tiết các bước
             </button>
+            {selectedRoom && (
+              <button
+                onClick={() => openGoogleMapsDirections()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-sky-200 text-sky-700 font-bold text-xs hover:bg-sky-50 transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Mở Google Maps
+              </button>
+            )}
             <button
-              onClick={() => setActiveRoute(null)}
+              onClick={() => { setActiveRoute(null); setRouteCoordinates([]); }}
               className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors"
             >
               Tắt chỉ đường
@@ -305,7 +354,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setViewMode('leaflet')}
+              onClick={() => { setViewMode('leaflet'); setLayoutEditMode(false); }}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                 viewMode === 'leaflet'
                   ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
@@ -328,6 +377,17 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
               <span>Sơ Đồ Mặt Bằng Tầng (Floor Plan)</span>
             </button>
           </div>
+
+          {isAdmin && viewMode === 'floor' && (
+            <button
+              type="button"
+              onClick={() => setLayoutEditMode(value => !value)}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all ${layoutEditMode ? 'bg-amber-500 text-white shadow-md shadow-amber-500/30' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'}`}
+            >
+              <Move className="w-4 h-4" />
+              {layoutEditMode ? 'Xong sắp xếp' : 'Sắp xếp vị trí phòng'}
+            </button>
+          )}
 
           <div className="text-xs text-slate-500 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -419,6 +479,22 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
           </aside>
 
           <div className="min-w-0 w-full">
+            {viewMode === 'leaflet' && (
+              <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-sky-200 bg-sky-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs font-semibold text-slate-700">
+                  {selectedRoom ? <>Điểm đến: <strong className="text-sky-800">Phòng {selectedRoom.room_number}</strong></> : 'Chọn một phòng ở danh sách bên trái, rồi bắt đầu chỉ đường.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleNavigateSelectedRoom}
+                  disabled={isLocatingForRoute}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm shadow-sky-600/25 hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Navigation className="h-4 w-4" />
+                  {isLocatingForRoute ? 'Đang lấy vị trí...' : 'Chỉ đường từ vị trí của tôi'}
+                </button>
+              </div>
+            )}
             {viewMode === 'leaflet' ? (
               <LeafletCampusMap
                 buildings={safeBuildingsList}
@@ -447,6 +523,8 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
                   indoorPath={activeRoute?.floorPoints?.map(p => ({ x: p.x, y: p.y }))}
                   onStartNavigateToRoom={handleStartNavigateToRoom}
                   isTechnicianMode={isTechnicianMode}
+                  editable={layoutEditMode}
+                  onMoveRoom={handleMoveRoom}
                 />
               )
             )}

@@ -7,12 +7,14 @@ import { ShieldAlert } from 'lucide-react';
 interface ProtectedRouteProps {
   children: React.ReactElement;
   requiredPermission?: Permission;
+  requiredAnyPermissions?: Permission[];
   requiredRoles?: RoleName[];
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requiredPermission,
+  requiredAnyPermissions,
   requiredRoles
 }) => {
   const { user, isAuthenticated, isLoading, hasPermission, hasAnyRole } = useAuth();
@@ -46,6 +48,21 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         >
           Quay lại trang trước
         </button>
+      </div>
+    );
+  }
+
+  if (requiredAnyPermissions && !requiredAnyPermissions.some(permission => hasPermission(permission))) {
+    return (
+      <div className="max-w-md mx-auto py-16 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4 border border-rose-200">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Quyền Truy Cập Bị Giới Hạn</h2>
+        <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+          Tài khoản của bạn chưa được cấp quyền quản lý phù hợp để vào khu vực này.
+        </p>
+        <button onClick={() => window.history.back()} className="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors">Quay lại trang trước</button>
       </div>
     );
   }

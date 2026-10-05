@@ -156,10 +156,14 @@ export const ApiService = {
     return res.data.data;
   },
 
+  getMyIncidentReports: async (): Promise<IncidentReport[]> => {
+    const res = await api.get<{ success: boolean; data: IncidentReport[] }>('/incident-reports/mine');
+    return res.data.data;
+  },
+
   createIncidentReport: async (formData: FormData): Promise<{ success: boolean; message: string; data: IncidentReport }> => {
-    const res = await api.post('/incident-reports', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    });
+    // Không tự đặt Content-Type: trình duyệt/Axios sẽ tự kèm boundary cho FormData.
+    const res = await api.post('/incident-reports', formData);
     return res.data;
   },
 
