@@ -4,3 +4,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Reserve the same space that the fixed mobile menu occupies, including a notch. */
+:root {
+  --mobile-nav-height: 65px;
+}
+
+.app-header {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.mobile-bottom-nav {
+  height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+  padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+}
+
+.app-content {
+  padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 1rem);
+}
+
+/* Wide admin tables scroll locally instead of inheriting page-level word splitting. */
+.admin-data-table {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.admin-data-table th {
+  white-space: nowrap;
+}
+
+@media (min-width: 1024px) {
+  .app-content {
+    padding-bottom: 2rem;
+  }
+}

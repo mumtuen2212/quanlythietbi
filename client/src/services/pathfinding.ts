@@ -6,6 +6,8 @@ export interface NavigationStep {
 }
 
 export interface RouteResult {
+  coordinates?: [number, number][];
+  notice?: string;
   fromName: string;
   toName: string;
   totalDistanceMeters: number;

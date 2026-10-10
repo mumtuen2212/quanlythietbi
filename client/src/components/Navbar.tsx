@@ -54,31 +54,32 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const navItems = [
-    { path: '/', label: 'Bản đồ & Sơ đồ Tầng', icon: MapPin },
-    { path: '/qr-scanner', label: 'Quét mã QR', icon: QrCode },
-    { path: '/manuals', label: 'Hướng dẫn sử dụng', icon: BookOpen },
-    { path: '/report-incident', label: 'Báo hỏng thiết bị', icon: AlertTriangle }
+    { path: '/', label: 'Bản đồ & Sơ đồ Tầng', mobileLabel: 'Bản đồ', icon: MapPin },
+    { path: '/qr-scanner', label: 'Quét mã QR', mobileLabel: 'Quét QR', icon: QrCode },
+    { path: '/manuals', label: 'Hướng dẫn sử dụng', mobileLabel: 'Hướng dẫn', icon: BookOpen },
+    { path: '/report-incident', label: 'Báo hỏng thiết bị', mobileLabel: 'Báo hỏng', icon: AlertTriangle }
   ];
 
   if (canAccessAdmin) {
-    navItems.push({ path: '/admin', label: 'Quản trị & KTV', icon: Settings });
+    navItems.push({ path: '/admin', label: 'Quản trị & KTV', mobileLabel: 'Quản trị', icon: Settings });
   }
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+    <>
+    <header className="app-header sticky top-0 z-40 shrink-0 bg-white border-b border-slate-200 shadow-sm">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between gap-3 h-16">
           {/* Logo & Brand */}
-          <Link to="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-sky-500/20 group-hover:scale-105 transition-transform">
-              <School className="w-6 h-6" />
+          <Link to="/" className="flex min-w-0 items-center gap-2 sm:gap-3 group" aria-label="TDMU Campus - Trang chủ">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-sky-500/20 group-hover:scale-105 transition-transform">
+              <School className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <div className="flex items-center gap-1.5 font-bold text-slate-900 leading-tight text-base sm:text-lg">
-                <span>TDMU Campus</span>
-                <span className="text-sky-600 text-xs px-1.5 py-0.5 rounded bg-sky-50 font-semibold border border-sky-200">Bản Đồ & CSVC</span>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-1.5 font-bold text-slate-900 leading-tight text-sm sm:text-lg">
+                <span className="truncate">TDMU Campus</span>
+                <span className="hidden xl:inline shrink-0 text-sky-600 text-xs px-1.5 py-0.5 rounded bg-sky-50 font-semibold border border-sky-200">Bản Đồ & CSVC</span>
               </div>
-              <p className="text-xs text-slate-500 hidden sm:block">Sơ đồ khuôn viên & Quản lý thiết bị</p>
+              <p className="text-xs text-slate-500 hidden sm:block truncate">Sơ đồ khuôn viên & Quản lý thiết bị</p>
             </div>
           </Link>
 
@@ -105,7 +106,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
 
           {/* User Profile & Auth Controls */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             {isAuthenticated && user ? (
               <div className="flex items-center gap-2">
                 <div className="hidden lg:flex flex-col text-right">
@@ -123,6 +124,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={logout}
                   className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                   title="Đăng xuất"
+                  aria-label="Đăng xuất"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Thoát</span>
@@ -132,7 +134,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-1.5">
                 <Link
                   to="/login"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-all shadow-sm shadow-sky-600/25"
+                  className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-all shadow-sm shadow-sky-600/25"
                 >
                   <LogIn className="w-3.5 h-3.5" />
                   <span>Đăng Nhập</span>
@@ -142,7 +144,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <Link
               to="/qr-scanner"
-              className="lg:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-semibold shadow-sm"
+              className="hidden sm:flex lg:hidden items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-semibold shadow-sm"
             >
               <QrCode className="w-4 h-4" />
               <span>QR</span>
@@ -150,6 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       </div>
+    </header>
 
       {showProfile && user && createPortal(<div className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-slate-900/60 px-4 pt-24 pb-8">
         <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
@@ -173,8 +176,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>, document.body)}
 
-      {/* Mobile Bottom Navigation Bar */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200 px-2 py-2 flex justify-around shadow-lg safe-area-bottom">
+      {/* Render outside the header so a filtered ancestor cannot move fixed navigation. */}
+      {createPortal(<nav
+        aria-label="Điều hướng điện thoại"
+        className="mobile-bottom-nav lg:hidden fixed bottom-0 inset-x-0 z-50 bg-white border-t border-slate-200 px-2 grid shadow-lg"
+        style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}
+      >
         {navItems.map(item => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
@@ -182,18 +189,20 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Link
               key={item.path}
               to={item.path}
-              className={`flex flex-col items-center gap-1 py-1 px-2 rounded-lg text-[10px] font-medium transition-colors ${
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
+              className={`flex min-w-0 h-16 flex-col items-center justify-center gap-1 px-1 rounded-lg text-[10px] font-medium transition-colors ${
                 isActive ? 'text-sky-600 font-bold' : 'text-slate-500 hover:text-slate-800'
               }`}
             >
               <div className={`p-1 rounded-lg ${isActive ? 'bg-sky-50' : ''}`}>
                 <Icon className="w-5 h-5" />
               </div>
-              <span className="truncate max-w-[65px]">{item.label}</span>
+              <span className="max-w-full truncate">{item.mobileLabel}</span>
             </Link>
           );
         })}
-      </div>
-    </header>
+      </nav>, document.body)}
+    </>
   );
 };

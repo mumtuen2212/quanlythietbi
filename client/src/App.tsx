@@ -32,7 +32,7 @@ export const App: React.FC = () => {
             isTechnicianMode={isTechnicianMode}
             onToggleTechnicianMode={() => setIsTechnicianMode(prev => !prev)}
           />
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+          <main className="app-content flex-1 min-w-0 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6">
             <Routes>
               <Route path="/" element={<HomePage isTechnicianMode={isTechnicianMode} />} />
               <Route path="/login" element={<LoginPage />} />

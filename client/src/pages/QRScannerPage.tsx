@@ -1,13 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Html5Qrcode } from 'html5-qrcode';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeGenerator } from '../components/QRCodeGenerator';
 import { 
   QrCode, 
   Camera, 
   Upload, 
-  ArrowRight, 
-  Sparkles, 
   Building2, 
   AlertCircle,
   ClipboardList,
@@ -93,9 +91,11 @@ export const QRScannerPage: React.FC = () => {
 
     try {
       setErrorMsg(null);
+      await stopScanner();
       const html5QrCode = new Html5Qrcode('reader');
       const decodedText = await html5QrCode.scanFile(file, true);
-      handleDetectedCode(decodedText);
+      html5QrCode.clear();
+      await handleDetectedCode(decodedText);
     } catch (err) {
       setErrorMsg('Không tìm thấy mã QR hợp lệ trong hình ảnh đã chọn.');
     }
@@ -114,7 +114,8 @@ export const QRScannerPage: React.FC = () => {
           navigate(`/rooms/${room.id}?from=qr`);
           return;
         }
-      } catch {
+      } catch (error: any) {
+        if (error.response?.status !== 404) throw error;
         // Không phải mã phòng: tiếp tục hỗ trợ tem QR thiết bị đã in trước đó.
       }
 
@@ -124,7 +125,8 @@ export const QRScannerPage: React.FC = () => {
           navigate(`/devices/${dev.id}?from=qr`);
           return;
         }
-      } catch {
+      } catch (error: any) {
+        if (error.response?.status !== 404) throw error;
         // Hiển thị một thông báo chung, dễ hiểu bên dưới.
       }
 
@@ -133,12 +135,6 @@ export const QRScannerPage: React.FC = () => {
       setErrorMsg('Lỗi khi tra cứu mã QR từ máy chủ.');
     }
   };
-
-  // Mẫu QR phòng để kiểm tra nhanh khi chưa in tem QR.
-  const sampleQRCodes = [
-    { label: 'Phòng A.301', code: 'QR-ROOM-A301', desc: 'Xem số lượng và danh sách thiết bị trong phòng' },
-    { label: 'Phòng A.302', code: 'QR-ROOM-A302', desc: 'Chọn thiết bị để xem hướng dẫn hoặc báo hỏng' }
-  ];
 
   return (
     <div className="max-w-3xl mx-auto space-y-8 pb-20 md:pb-12">
@@ -168,18 +164,7 @@ export const QRScannerPage: React.FC = () => {
         ))}
       </div>
 
-      <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-center gap-5">
-        <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100 shrink-0">
-          <QRCodeSVG value="QR-ROOM-A1-101" size={128} bgColor="#f8fafc" fgColor="#075985" level="H" />
-        </div>
-        <div className="text-center sm:text-left space-y-2">
-          <p className="text-sm font-extrabold text-slate-900">QR phòng thử nghiệm: A1-101</p>
-          <p className="text-xs text-slate-500 max-w-md">
-            Sau khi chạy dữ liệu mẫu, hãy dùng điện thoại quét mã này hoặc chụp màn hình rồi chọn “Tải ảnh QR từ máy”.
-          </p>
-          <code className="inline-block px-2 py-1 rounded bg-slate-100 text-xs font-bold text-sky-800">QR-ROOM-A1-101</code>
-        </div>
-      </div>
+      <QRCodeGenerator />
 
       {/* Scanner Box */}
       <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
@@ -230,37 +215,6 @@ export const QRScannerPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Demo Test Simulation (Rất tiện cho việc chấm bài đồ án) */}
-      <div className="bg-gradient-to-br from-slate-900 to-indigo-950 rounded-3xl p-6 sm:p-8 text-white space-y-4 shadow-xl">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-amber-400" />
-          <h2 className="text-lg font-bold">Thử nghiệm nhanh (Demo Simulation)</h2>
-        </div>
-        <p className="text-xs text-slate-300">
-          Nếu chưa in tem QR ra giấy, bạn có thể bấm mẫu QR phòng dưới đây để kiểm tra luồng xem thiết bị:
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-          {sampleQRCodes.map((item, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleDetectedCode(item.code)}
-              className="text-left p-4 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 backdrop-blur transition-all flex items-center justify-between group"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-sky-400" />
-                  <span className="font-bold text-sm text-white group-hover:text-sky-300">{item.label}</span>
-                </div>
-                <p className="text-[11px] text-slate-300 font-mono">{item.code}</p>
-                <p className="text-[11px] text-slate-400">{item.desc}</p>
-              </div>
-
-              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-1 transition-all" />
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 };

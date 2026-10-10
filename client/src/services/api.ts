@@ -39,6 +39,10 @@ api.interceptors.request.use((config) => {
 });
 
 export const ApiService = {
+  createQrCode: async (type: 'room' | 'device', id: number): Promise<{ type: 'room' | 'device'; id: number; code: string; name: string }> => {
+    const res = await api.post('/qr/create', { type, id });
+    return res.data.data;
+  },
   // Stats
   getStats: async (): Promise<DashboardStats> => {
     const res = await api.get<{ success: boolean; data: DashboardStats }>('/stats');

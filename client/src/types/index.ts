@@ -178,6 +178,8 @@ export interface FAQItem {
 }
 
 export interface Manual {
+  category_name?: string;
+  applicable_model?: string | null;
   id: number;
   category_id: number;
   device_id: number | null;

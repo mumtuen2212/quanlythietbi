@@ -5,6 +5,28 @@ import QRCode from 'qrcode';
 import { PostgresDatabase } from '../data/postgresDb';
 import { authenticateToken, requirePermission, requireRole, optionalAuth, AuthRequest } from './auth';
 import { uploadsDirectory } from '../uploads';
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+import { createSavedQr, canCreateQr, QrCreationError } from '../qrPolicy';
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+>>>>>>> Stashed changes
 
 const router = Router();
 
@@ -524,7 +546,23 @@ router.post('/maintenance-logs', authenticateToken, requirePermission('RESOLVE_R
 });
 
 // ================= QR CODE GENERATOR =================
-router.get('/qr/generate', async (req: Request, res: Response) => {
+router.post('/qr/create', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { type, id } = req.body;
+  if ((type !== 'room' && type !== 'device') || !Number.isSafeInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'Hãy chọn phòng hoặc thiết bị hợp lệ.' });
+  }
+  if (!canCreateQr(req.user, type)) return res.status(403).json({ success: false, message: 'Bạn chưa được cấp quyền tạo QR cho đối tượng này.' });
+  try {
+    return res.json({ success: true, data: await createSavedQr(type, id, PostgresDatabase) });
+  } catch (error) {
+    if (error instanceof QrCreationError) return res.status(error.status).json({ success: false, message: error.message });
+    console.error('Không thể tạo và lưu QR:', error);
+    return res.status(503).json({ success: false, message: 'Không thể tạo và lưu mã QR. Vui lòng thử lại.' });
+  }
+});
+
+router.get('/qr/generate', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!canCreateQr(req.user, 'room') && !canCreateQr(req.user, 'device')) return res.status(403).json({ success: false, message: 'Bạn chưa được cấp quyền tạo QR.' });
   try {
     const text = req.query.text as string;
     if (!text) {

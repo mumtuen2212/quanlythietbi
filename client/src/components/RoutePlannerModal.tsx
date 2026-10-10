@@ -1,196 +1,51 @@
-import React, { useState } from 'react';
-import { 
-  Navigation, 
-  MapPin, 
-  ArrowRight, 
-  ArrowUpDown, 
-  Footprints, 
-  Clock, 
-  Sparkles, 
-  X,
-  Building2,
-  DoorOpen,
-  ArrowRightLeft
-} from 'lucide-react';
-import { CAMPUS_LOCATIONS, PathfindingService, RouteResult } from '../services/pathfinding';
+import React, { useEffect, useState } from 'react';
+import { Navigation, X } from 'lucide-react';
+import { findWalkingRoute, RouteLocation } from '../services/campusRouting';
+import type { RouteResult } from '../services/pathfinding';
 
 interface RoutePlannerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onApplyRoute: (route: RouteResult) => void;
-  initialFromId?: string;
+  locations: RouteLocation[];
   initialToId?: string;
+  initialRoute?: RouteResult | null;
 }
 
 export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
-  isOpen,
-  onClose,
-  onApplyRoute,
-  initialFromId = 'POI-GATE-1',
-  initialToId = 'ROOM-1'
+  isOpen, onClose, onApplyRoute, locations, initialToId, initialRoute
 }) => {
-  const [fromId, setFromId] = useState(initialFromId);
-  const [toId, setToId] = useState(initialToId);
-  const [routeResult, setRouteResult] = useState<RouteResult | null>(() => 
-    PathfindingService.findRoute(initialFromId, initialToId)
-  );
-
+  const [fromId, setFromId] = useState('');
+  const [toId, setToId] = useState('');
+  const [route, setRoute] = useState<RouteResult | null>(null);
+  const [error, setError] = useState('');
+  const signature = locations.map(l => l.id).join(',');
+  useEffect(() => {
+    if (!isOpen) return;
+    setFromId(locations.find(l => l.name === initialRoute?.fromName)?.id || locations[0]?.id || '');
+    setToId(initialToId || locations.find(l => l.name === initialRoute?.toName)?.id || locations[1]?.id || '');
+    setRoute(initialRoute || null);
+    setError('');
+  }, [isOpen, initialToId, initialRoute, signature]);
   if (!isOpen) return null;
-
-  const handleCalculate = () => {
-    const res = PathfindingService.findRoute(fromId, toId);
-    setRouteResult(res);
+  const calculate = () => {
+    const from = locations.find(l => l.id === fromId), to = locations.find(l => l.id === toId);
+    setRoute(null); setError('');
+    if (!from || !to) { setError('Hãy chọn điểm xuất phát và điểm đến có tọa độ.'); return; }
+    try { setRoute(findWalkingRoute(from, to)); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Không tìm được tuyến đi bộ.'); }
   };
-
-  const handleSwap = () => {
-    const temp = fromId;
-    setFromId(toId);
-    setToId(temp);
-    const res = PathfindingService.findRoute(toId, temp);
-    setRouteResult(res);
-  };
-
-  const handleApply = () => {
-    if (routeResult) {
-      onApplyRoute(routeResult);
-      onClose();
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6 animate-in fade-in zoom-in max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center">
-              <Navigation className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-xl font-extrabold text-slate-900">Tìm Đường Đi Trong Trường</h3>
-              <p className="text-xs text-slate-500">Chỉ đường chi tiết từ cổng tới tận cửa phòng học</p>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Input Selectors */}
-        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3 relative">
-          {/* Origin */}
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              <span>Điểm xuất phát (Từ đâu?)</span>
-            </label>
-            <select
-              value={fromId}
-              onChange={e => {
-                setFromId(e.target.value);
-                const res = PathfindingService.findRoute(e.target.value, toId);
-                setRouteResult(res);
-              }}
-              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500"
-            >
-              {CAMPUS_LOCATIONS.map(loc => (
-                <option key={loc.id} value={loc.id}>
-                  [{loc.category}] {loc.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Swap button */}
-          <div className="flex justify-center -my-1">
-            <button
-              onClick={handleSwap}
-              className="p-2 rounded-full bg-white border border-slate-200 text-slate-600 hover:text-sky-600 hover:border-sky-300 shadow-sm transition-all"
-              title="Đổi chiều đi"
-            >
-              <ArrowUpDown className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Destination */}
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-              <span>Điểm đến (Đến đâu?)</span>
-            </label>
-            <select
-              value={toId}
-              onChange={e => {
-                setToId(e.target.value);
-                const res = PathfindingService.findRoute(fromId, e.target.value);
-                setRouteResult(res);
-              }}
-              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500"
-            >
-              {CAMPUS_LOCATIONS.map(loc => (
-                <option key={loc.id} value={loc.id}>
-                  [{loc.category}] {loc.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Route Summary & Steps */}
-        {routeResult && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between bg-sky-50 p-3.5 rounded-2xl border border-sky-100 text-xs">
-              <div className="flex items-center gap-2">
-                <Footprints className="w-4 h-4 text-sky-600" />
-                <span className="font-semibold text-slate-700">Tổng khoảng cách:</span>
-                <span className="font-extrabold text-sky-700">{routeResult.totalDistanceMeters} mét</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-sky-600" />
-                <span className="font-semibold text-slate-700">Đi bộ:</span>
-                <span className="font-extrabold text-sky-700">~{routeResult.estimatedMinutes} phút</span>
-              </div>
-            </div>
-
-            {/* Turn by turn navigation steps */}
-            <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
-              {routeResult.steps.map((step, idx) => (
-                <div key={idx} className="flex items-start gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <span className="w-5 h-5 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
-                    {idx + 1}
-                  </span>
-                  <div className="space-y-0.5">
-                    <p className="font-semibold text-slate-800 leading-relaxed">{step.instruction}</p>
-                    <p className="text-[10px] text-slate-400 font-medium">Khoảng {step.distanceMeters}m</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Action Button */}
-        <div className="flex gap-2 pt-2">
-          <button
-            onClick={handleApply}
-            className="flex-1 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-600/30 flex items-center justify-center gap-2 transition-all"
-          >
-            <Navigation className="w-4 h-4" />
-            <span>Vẽ Đường Đi Lên Bản Đồ</span>
-          </button>
-          <button
-            onClick={onClose}
-            className="px-5 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs hover:bg-slate-200 transition-colors"
-          >
-            Đóng
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm">
+    <section role="dialog" aria-modal="true" aria-labelledby="route-title" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl space-y-5">
+      <div className="flex items-center justify-between"><h2 id="route-title" className="flex items-center gap-2 text-lg font-extrabold"><Navigation className="text-sky-600" />Chỉ đường đi bộ trong trường</h2><button type="button" aria-label="Đóng chỉ đường" onClick={onClose}><X /></button></div>
+      <p className="text-xs text-slate-500">Chọn cổng, vị trí hiện tại hoặc phòng đã có tọa độ. Đường đi hiển thị ngay trên website.</p>
+      <label className="block text-sm font-semibold">Điểm xuất phát<select value={fromId} onChange={e => { setFromId(e.target.value); setRoute(null); }} className="mt-2 w-full rounded-xl border p-3"><option value="">-- Chọn điểm xuất phát --</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+      <label className="block text-sm font-semibold">Điểm đến<select value={toId} onChange={e => { setToId(e.target.value); setRoute(null); }} className="mt-2 w-full rounded-xl border p-3"><option value="">-- Chọn điểm đến --</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+      {locations.length === 0 && <p className="text-sm text-amber-700">Chưa tải được địa điểm. Hãy kiểm tra kết nối server.</p>}
+      {error && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{error}</p>}
+      <button type="button" onClick={calculate} disabled={!fromId || !toId} className="rounded-xl bg-slate-100 px-4 py-2 font-bold disabled:opacity-50">Tìm tuyến đi bộ</button>
+      {route && <div className="rounded-2xl bg-sky-50 p-4 space-y-3"><p className="font-bold text-sky-800">{route.totalDistanceMeters}m · khoảng {route.estimatedMinutes} phút</p><ol className="space-y-2">{route.steps.map((step, i) => <li className="text-sm" key={i}>{i + 1}. {step.instruction}</li>)}</ol><p className="text-xs text-slate-500">{route.notice}</p></div>}
+      <button type="button" disabled={!route} onClick={() => { if (route) { onApplyRoute(route); onClose(); } }} className="w-full rounded-xl bg-sky-600 py-3 font-bold text-white disabled:opacity-50">Vẽ đường đi trên bản đồ</button>
+    </section>
+  </div>;
 };

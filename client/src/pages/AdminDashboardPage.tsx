@@ -718,7 +718,7 @@ export const AdminDashboardPage: React.FC = () => {
     return (
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
         <p className="text-xs text-slate-500">Hiển thị <strong className="text-slate-700">{first}–{last}</strong> / {totalItems} {label}</p>
-        <div className="flex items-center gap-1.5">
+        <div className="flex max-w-full flex-wrap justify-center items-center gap-1.5">
           <button type="button" onClick={() => onChange(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">Trước</button>
           {pages.map((page, index) => (
             <React.Fragment key={page}>
@@ -733,12 +733,12 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8 pb-20 md:pb-12">
+    <div className="admin-dashboard min-w-0 max-w-full [overflow-wrap:anywhere] space-y-8 pb-20 md:pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 flex items-center gap-2.5">
-            <Settings className="w-7 h-7 text-sky-600" />
+            <Settings className="w-7 h-7 shrink-0 text-sky-600" />
             <span>Kỹ Thuật Viên & Quản Trị CSVC</span>
           </h1>
           <p className="text-slate-500 text-sm">Xử lý báo hỏng, theo dõi bảo trì và quản lý vòng đời thiết bị trường học</p>
@@ -747,55 +747,67 @@ export const AdminDashboardPage: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200">
+      <div aria-label="Các mục quản trị" className="grid min-w-0 grid-cols-2 gap-2 border-b border-slate-200 sm:flex sm:flex-wrap sm:items-center">
         {canViewReports && <button
           onClick={() => setActiveTab('reports')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
+          aria-label="Phiếu báo hỏng"
+          aria-pressed={activeTab === 'reports'}
+          className={`flex min-w-0 items-center gap-2 px-3 sm:px-5 py-3 border-b-2 font-bold text-xs sm:text-sm transition-all ${
             activeTab === 'reports'
               ? 'border-sky-600 text-sky-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <AlertTriangle className="w-4 h-4" />
-          <span>{isReporter ? 'Theo Dõi Sự Cố' : `Phiếu Báo Hỏng Cần Xử Lý (${reports.filter(r => r.status !== 'RESOLVED').length})`}</span>
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span className="sm:hidden">{isReporter ? 'Theo dõi sự cố' : `Báo hỏng (${reports.filter(r => r.status !== 'RESOLVED').length})`}</span>
+          <span className="hidden sm:inline">{isReporter ? 'Theo Dõi Sự Cố' : `Phiếu Báo Hỏng Cần Xử Lý (${reports.filter(r => r.status !== 'RESOLVED').length})`}</span>
         </button>}
 
         {canManageDevices && <button
           onClick={() => setActiveTab('devices')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
+          aria-label="Quản lý thiết bị"
+          aria-pressed={activeTab === 'devices'}
+          className={`flex min-w-0 items-center gap-2 px-3 sm:px-5 py-3 border-b-2 font-bold text-xs sm:text-sm transition-all ${
             activeTab === 'devices'
               ? 'border-sky-600 text-sky-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Cpu className="w-4 h-4" />
-          <span>Quản lý thiết bị ({devices.length})</span>
+          <Cpu className="w-4 h-4 shrink-0" />
+          <span className="sm:hidden">Thiết bị ({devices.length})</span>
+          <span className="hidden sm:inline">Quản lý thiết bị ({devices.length})</span>
         </button>}
 
         {canSeeRoomsTab && (
           <button
             onClick={() => setActiveTab('rooms')}
-            className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
+            aria-label="Quản lý phòng"
+            aria-pressed={activeTab === 'rooms'}
+            className={`flex min-w-0 items-center gap-2 px-3 sm:px-5 py-3 border-b-2 font-bold text-xs sm:text-sm transition-all ${
               activeTab === 'rooms'
                 ? 'border-sky-600 text-sky-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Building2 className="w-4 h-4" />
-            <span>Quản Lý Phòng ({rooms.length})</span>
+            <Building2 className="w-4 h-4 shrink-0" />
+            <span className="sm:hidden">Phòng ({rooms.length})</span>
+            <span className="hidden sm:inline">Quản Lý Phòng ({rooms.length})</span>
           </button>
         )}
 
         {canViewLogs && <button
           onClick={() => setActiveTab('logs')}
-          className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
+          aria-label="Nhật ký bảo trì"
+          aria-pressed={activeTab === 'logs'}
+          className={`flex min-w-0 items-center gap-2 px-3 sm:px-5 py-3 border-b-2 font-bold text-xs sm:text-sm transition-all ${
             activeTab === 'logs'
               ? 'border-sky-600 text-sky-600'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Wrench className="w-4 h-4" />
-          <span>Nhật Ký Bảo Trì ({logs.length})</span>
+          <Wrench className="w-4 h-4 shrink-0" />
+          <span className="sm:hidden">Bảo trì ({logs.length})</span>
+          <span className="hidden sm:inline">Nhật Ký Bảo Trì ({logs.length})</span>
         </button>}
 
         {canManageAccounts && (
@@ -804,14 +816,17 @@ export const AdminDashboardPage: React.FC = () => {
               setActiveTab('permissions');
               loadUsersData();
             }}
-            className={`flex items-center gap-2 px-5 py-3 border-b-2 font-bold text-sm transition-all ${
+            aria-label="Phân quyền tài khoản"
+            aria-pressed={activeTab === 'permissions'}
+            className={`flex min-w-0 items-center gap-2 px-3 sm:px-5 py-3 border-b-2 font-bold text-xs sm:text-sm transition-all ${
               activeTab === 'permissions'
                 ? 'border-sky-600 text-sky-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <ShieldCheck className="w-4 h-4" />
-            <span>Cấp Quyền & RBAC ({usersList.length || 4})</span>
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            <span className="sm:hidden">Phân quyền</span>
+            <span className="hidden sm:inline">Cấp Quyền & RBAC ({usersList.length || 4})</span>
           </button>
         )}
       </div>
@@ -850,7 +865,7 @@ export const AdminDashboardPage: React.FC = () => {
                   key={report.id}
                   className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6"
                 >
-                  <div className="space-y-2 max-w-2xl">
+                  <div className="min-w-0 space-y-2 max-w-2xl">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono font-bold text-xs text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded border border-sky-200">
                         {report.report_code}
@@ -947,8 +962,9 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
 
           <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-600">
+            <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500 lg:hidden">Vuốt ngang để xem đầy đủ thông tin và thao tác.</p>
+            <div className="max-w-full overflow-x-auto" role="region" aria-label="Bảng quản lý thiết bị" tabIndex={0}>
+            <table className="admin-data-table min-w-[1040px] w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
                 <tr>
                   <th className="px-5 py-4">Mã Thiết Bị</th>
@@ -963,17 +979,17 @@ export const AdminDashboardPage: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {displayedDevices.map(dev => (
                   <tr key={dev.id} className="hover:bg-slate-50/50">
-                    <td className="px-5 py-4 font-mono font-bold text-sky-700">{dev.device_code}</td>
-                    <td className="px-5 py-4">
+                    <td className="px-5 py-4 whitespace-nowrap font-mono font-bold text-sky-700">{dev.device_code}</td>
+                    <td className="min-w-[220px] px-5 py-4">
                       <p className="font-bold text-slate-900">{dev.name}</p>
                       <p className="text-[11px] text-slate-400">Model: {dev.model || 'N/A'}</p>
                     </td>
-                    <td className="px-5 py-4 font-semibold text-slate-800">{dev.room_name}</td>
+                    <td className="min-w-[160px] px-5 py-4 font-semibold text-slate-800">{dev.room_name}</td>
                     <td className="px-5 py-4">{dev.category_name}</td>
                     <td className="px-5 py-4">
                       <StatusBadge status={dev.status} size="sm" />
                     </td>
-                    <td className="px-5 py-4 text-right font-mono text-[11px] text-slate-500">
+                    <td className="px-5 py-4 whitespace-nowrap text-right font-mono text-[11px] text-slate-500">
                       {dev.qr_code}
                     </td>
                     {canManageDevices && (
@@ -996,7 +1012,7 @@ export const AdminDashboardPage: React.FC = () => {
                 <p className="text-xs text-slate-500">
                   Hiển thị <strong className="text-slate-700">{deviceFirstItem}–{deviceLastItem}</strong> / {filteredDevices.length} thiết bị
                 </p>
-                <div className="flex items-center gap-1.5">
+                <div className="flex max-w-full flex-wrap justify-center items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => setDevicePage(page => Math.max(1, page - 1))}
@@ -1113,8 +1129,9 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
           ) : (
           <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-600">
+            <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500 lg:hidden">Vuốt ngang để xem đầy đủ thông tin và thao tác.</p>
+            <div className="max-w-full overflow-x-auto" role="region" aria-label="Bảng quản lý phòng" tabIndex={0}>
+              <table className="admin-data-table min-w-[1200px] w-full text-left text-xs text-slate-600">
                 <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
                   <tr>
                     <th className="px-5 py-4">Phòng</th>
@@ -1135,8 +1152,8 @@ export const AdminDashboardPage: React.FC = () => {
 
                     return (
                       <tr key={room.id} className="hover:bg-slate-50/50">
-                        <td className="px-5 py-4 font-mono font-black text-sky-700">{room.room_number}</td>
-                        <td className="px-5 py-4 font-bold text-slate-900">{room.name}</td>
+                        <td className="px-5 py-4 whitespace-nowrap font-mono font-black text-sky-700">{room.room_number}</td>
+                        <td className="min-w-[180px] px-5 py-4 font-bold text-slate-900">{room.name}</td>
                         <td className="px-5 py-4 font-semibold text-slate-800">{roomBuilding?.name || room.building_code || 'N/A'}</td>
                         <td className="px-5 py-4 font-semibold text-slate-800">Tầng {room.floor}</td>
                         <td className="px-5 py-4">
@@ -1206,7 +1223,7 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
           {displayedLogs.map(log => (
             <div key={log.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-500">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                 <span className="font-bold text-slate-800">KTV Phụ trách: {log.technician_name}</span>
                 <span>{log.performed_at}</span>
               </div>
@@ -1249,8 +1266,9 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
 
           <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+            <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500 lg:hidden">Vuốt ngang để xem đầy đủ thông tin và thao tác.</p>
+            <div className="max-w-full overflow-x-auto" role="region" aria-label="Bảng phân quyền tài khoản" tabIndex={0}>
+              <table className="admin-data-table min-w-[800px] w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50/75 text-slate-500 font-bold">
                     <th className="py-4 px-5 min-w-[200px]">Người Dùng</th>

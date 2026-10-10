@@ -16,8 +16,7 @@ import {
   Navigation,
   Compass,
   ChevronDown,
-  Move,
-  ExternalLink
+  Move
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { Building, Room, DashboardStats, CampusPOI } from '../types';
@@ -25,7 +24,8 @@ import { StatusBadge } from '../components/StatusBadge';
 import { LeafletCampusMap } from '../components/LeafletCampusMap';
 import { FloorPlanMap } from '../components/FloorPlanMap';
 import { RoutePlannerModal } from '../components/RoutePlannerModal';
-import { PathfindingService, RouteResult } from '../services/pathfinding';
+import { RouteResult } from '../services/pathfinding';
+import { findWalkingRoute, RouteLocation } from '../services/campusRouting';
 import { useAuth } from '../context/AuthContext';
 
 interface HomePageProps {
@@ -50,6 +50,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
   const [isLocatingForRoute, setIsLocatingForRoute] = useState(false);
   const [layoutEditMode, setLayoutEditMode] = useState(false);
+  const [routeError, setRouteError] = useState('');
 
   // Navigation & Route Planner
   const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
@@ -101,6 +102,14 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
   const handleApplyRoute = (route: RouteResult) => {
     setActiveRoute(route);
+    setRouteCoordinates(route.coordinates || []);
+    setRouteError('');
+    const destinationRoom = rooms.find(room => `Phòng ${room.room_number}` === route.toName);
+    setSelectedRoom(destinationRoom || null);
+    if (destinationRoom) {
+      setSelectedBuildingId(destinationRoom.building_id);
+      setSelectedFloor(destinationRoom.floor);
+    }
     setViewMode('leaflet');
   };
 
@@ -115,50 +124,30 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
     return null;
   };
 
-  const openGoogleMapsDirections = (room: Room | null = selectedRoom, location: [number, number] | null = userLocation) => {
-    if (!room) return;
-    const destination = getRoomDestination(room);
-    if (!destination) {
-      window.alert('Phòng này chưa có tọa độ bản đồ để mở chỉ đường.');
-      return;
-    }
-    const origin = location ? `&origin=${location[0]},${location[1]}` : '';
-    const url = `https://www.google.com/maps/dir/?api=1${origin}&destination=${destination[0]},${destination[1]}&travelmode=walking`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
   const handleStartNavigateToRoom = (room: Room) => {
-    if (!room) return;
-    const route = PathfindingService_fallback(room);
-    setActiveRoute(route);
-    const gateCoordinates: [number, number] = [10.9822, 106.6742];
-    const destination = getRoomDestination(room);
-    setRouteCoordinates(destination ? [gateCoordinates, destination] : []);
     setSelectedRoom(room);
+    setSelectedBuildingId(room.building_id);
     setViewMode('leaflet');
+    setIsRouteModalOpen(true);
   };
 
   const handleNavigateFromCurrentLocation = (room: Room, location: { latitude: number; longitude: number }) => {
     const destination = getRoomDestination(room);
-    if (!destination) return;
-
     setUserLocation([location.latitude, location.longitude]);
     setSelectedRoom(room);
     setSelectedBuildingId(room.building_id);
     setViewMode('leaflet');
 
-    // Không tự vẽ đường nội khu bằng tọa độ ước lượng vì có thể cắt qua tòa nhà.
-    setRouteCoordinates([]);
-    setActiveRoute({
-      fromName: 'Vị trí hiện tại của bạn',
-      toName: room.room_number,
-      totalDistanceMeters: 0,
-      estimatedMinutes: 0,
-      steps: [{ instruction: 'Đã mở Google Maps với chế độ đi bộ để chỉ đúng lối đi thực tế.', distanceMeters: 0, icon: 'walk' }],
-      campusPoints: [],
-      floorPoints: []
-    });
-    openGoogleMapsDirections(room, [location.latitude, location.longitude]);
+    try {
+      if (!destination) throw new Error('Phòng này chưa có tọa độ. Hãy cập nhật vị trí trước khi chỉ đường.');
+      handleApplyRoute(findWalkingRoute(
+        { id: 'current-location', name: 'Vị trí hiện tại của bạn', coordinates: [location.latitude, location.longitude] },
+        { id: `room-${room.id}`, name: `Phòng ${room.room_number}`, coordinates: destination }
+      ));
+    } catch (error) {
+      setActiveRoute(null); setRouteCoordinates([]);
+      setRouteError(error instanceof Error ? error.message : 'Không thể tìm tuyến đi bộ.');
+    }
   };
 
   const handleNavigateSelectedRoom = () => {
@@ -188,6 +177,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
   };
 
   const handleSelectRoom = (room: Room) => {
+    setActiveRoute(null); setRouteCoordinates([]); setRouteError('');
     setSelectedRoom(room);
     setSelectedBuildingId(room.building_id);
     setExpandedBuildingIds(previous => new Set([...previous, room.building_id]));
@@ -210,10 +200,11 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
     }
   };
 
-  const PathfindingService_fallback = (room: Room): RouteResult => {
-    const roomIdStr = `ROOM-${room.id}`;
-    return PathfindingService.findRoute('POI-GATE-1', roomIdStr);
-  };
+  const routeLocations: RouteLocation[] = [
+    ...(userLocation ? [{ id: 'current-location', name: 'Vị trí hiện tại của bạn', coordinates: userLocation }] : []),
+    ...pois.filter(p => Number.isFinite(p.latitude) && Number.isFinite(p.longitude)).map(p => ({ id: `poi-${p.id}`, name: p.name, coordinates: [Number(p.latitude), Number(p.longitude)] as [number, number] })),
+    ...rooms.flatMap(room => { const coordinates = getRoomDestination(room); return coordinates ? [{ id: `room-${room.id}`, name: `Phòng ${room.room_number}`, coordinates }] : []; })
+  ];
 
   // SỬA LỖI TẠI ĐÂY: Thêm phòng vệ (buildings || []) và ?.find
   const safeBuildingsList = buildings || [];
@@ -313,13 +304,14 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             </div>
             <div className="space-y-0.5">
               <div className="flex items-center gap-2 text-xs font-bold text-sky-800">
-                <span>{activeRoute.totalDistanceMeters > 0 ? 'Đang hiển thị lộ trình chỉ đường' : 'Đang dùng chỉ đường Google Maps'}</span>
+                <span>Đang hiển thị tuyến đi bộ trên website</span>
                 {activeRoute.totalDistanceMeters > 0 && <><span>•</span><span>{activeRoute.totalDistanceMeters}m (~{activeRoute.estimatedMinutes} phút đi bộ)</span></>}
               </div>
               <p className="text-sm font-extrabold text-slate-900">
                 {activeRoute.fromName} <span className="text-sky-600 font-bold">➔</span> {activeRoute.toName}
               </p>
               <p className="text-xs text-slate-600 font-medium">{activeRoute.steps?.[0]?.instruction}</p>
+              <p className="text-xs text-slate-500">{activeRoute.notice}</p>
             </div>
           </div>
 
@@ -330,15 +322,6 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
             >
               Xem chi tiết các bước
             </button>
-            {selectedRoom && (
-              <button
-                onClick={() => openGoogleMapsDirections()}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-sky-200 text-sky-700 font-bold text-xs hover:bg-sky-50 transition-colors"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Mở Google Maps
-              </button>
-            )}
             <button
               onClick={() => { setActiveRoute(null); setRouteCoordinates([]); }}
               className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors"
@@ -484,7 +467,7 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
                 <p className="text-xs font-semibold text-slate-700">
                   {selectedRoom ? <>Điểm đến: <strong className="text-sky-800">Phòng {selectedRoom.room_number}</strong></> : 'Chọn một phòng ở danh sách bên trái, rồi bắt đầu chỉ đường.'}
                 </p>
-                <button
+                <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsRouteModalOpen(true)} className="rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs font-bold text-sky-700">Chỉ đường từ cổng / điểm khác</button><button
                   type="button"
                   onClick={handleNavigateSelectedRoom}
                   disabled={isLocatingForRoute}
@@ -492,9 +475,10 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
                 >
                   <Navigation className="h-4 w-4" />
                   {isLocatingForRoute ? 'Đang lấy vị trí...' : 'Chỉ đường từ vị trí của tôi'}
-                </button>
+                </button></div>
               </div>
             )}
+            {routeError && <div role="alert" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{routeError} <button type="button" onClick={() => setIsRouteModalOpen(true)} className="font-bold underline">Chọn điểm xuất phát trên bản đồ</button></div>}
             {viewMode === 'leaflet' ? (
               <LeafletCampusMap
                 buildings={safeBuildingsList}
@@ -535,47 +519,47 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
       {/* Stats Overview */}
       {stats && (
-        <section className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-              <Building2 className="w-6 h-6" />
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white min-w-0 p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-2 sm:gap-4">
+            <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
+              <Building2 className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-xs text-slate-500 font-medium">Tổng phòng học</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.totalRooms || 0}</p>
+              <p className="text-xl sm:text-2xl font-bold text-slate-900">{stats.totalRooms || 0}</p>
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <Cpu className="w-6 h-6" />
+          <div className="bg-white min-w-0 p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-2 sm:gap-4">
+            <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+              <Cpu className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-xs text-slate-500 font-medium">Tổng thiết bị</p>
-              <p className="text-2xl font-bold text-slate-900">{stats.totalDevices || 0}</p>
+              <p className="text-xl sm:text-2xl font-bold text-slate-900">{stats.totalDevices || 0}</p>
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-6 h-6" />
+          <div className="bg-white min-w-0 p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-2 sm:gap-4">
+            <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-xs text-slate-500 font-medium">Đang hoạt động tốt</p>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-2xl font-bold text-emerald-600">{stats.activeDevices || 0}</span>
+              <div className="flex flex-wrap items-baseline gap-x-1.5">
+                <span className="text-xl sm:text-2xl font-bold text-emerald-600">{stats.activeDevices || 0}</span>
                 <span className="text-xs text-emerald-600 font-semibold">({stats.deviceHealthRatio || 0}%)</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
-              <AlertTriangle className="w-6 h-6" />
+          <div className="bg-white min-w-0 p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-2 sm:gap-4">
+            <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-xs text-slate-500 font-medium">Sự cố chờ xử lý</p>
-              <p className="text-2xl font-bold text-rose-600">{stats.pendingReports || 0}</p>
+              <p className="text-xl sm:text-2xl font-bold text-rose-600">{stats.pendingReports || 0}</p>
             </div>
           </div>
         </section>
@@ -697,6 +681,9 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
         isOpen={isRouteModalOpen}
         onClose={() => setIsRouteModalOpen(false)}
         onApplyRoute={handleApplyRoute}
+        locations={routeLocations}
+        initialToId={selectedRoom ? `room-${selectedRoom.id}` : undefined}
+        initialRoute={activeRoute}
       />
     </div>
   );

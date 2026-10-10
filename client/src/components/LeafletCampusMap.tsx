@@ -284,7 +284,7 @@ export const LeafletCampusMap: React.FC<LeafletCampusMapProps> = ({
   }, [rooms, selectedRoom]);
 
   return (
-    <div className="relative w-full h-[clamp(360px,58vh,680px)] min-h-[360px] sm:h-[clamp(420px,65vh,680px)] sm:min-h-[420px] xl:h-[clamp(540px,68vh,680px)] xl:min-h-[540px] rounded-3xl overflow-hidden border border-slate-200 shadow-md bg-slate-100 flex flex-col">
+    <div className="relative isolate z-0 w-full h-[clamp(360px,58vh,680px)] min-h-[360px] sm:h-[clamp(420px,65vh,680px)] sm:min-h-[420px] xl:h-[clamp(540px,68vh,680px)] xl:min-h-[540px] rounded-3xl overflow-hidden border border-slate-200 shadow-md bg-slate-100 flex flex-col">
       {/* Legend / Info Badge */}
       <div className="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur p-3 rounded-2xl shadow-lg border border-slate-200 text-xs hidden sm:block max-w-xs">
         <div className="font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">

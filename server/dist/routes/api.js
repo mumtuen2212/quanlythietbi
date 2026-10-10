@@ -10,6 +10,28 @@ const qrcode_1 = __importDefault(require("qrcode"));
 const postgresDb_1 = require("../data/postgresDb");
 const auth_1 = require("./auth");
 const uploads_1 = require("../uploads");
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+const qrPolicy_1 = require("../qrPolicy");
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+=======
+>>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
+>>>>>>> Stashed changes
 const router = (0, express_1.Router)();
 // Multer configuration for file uploads
 const storage = multer_1.default.diskStorage({
@@ -522,7 +544,26 @@ router.post('/maintenance-logs', auth_1.authenticateToken, (0, auth_1.requirePer
     }
 });
 // ================= QR CODE GENERATOR =================
-router.get('/qr/generate', async (req, res) => {
+router.post('/qr/create', auth_1.authenticateToken, async (req, res) => {
+    const { type, id } = req.body;
+    if ((type !== 'room' && type !== 'device') || !Number.isSafeInteger(id) || id <= 0) {
+        return res.status(400).json({ success: false, message: 'Hãy chọn phòng hoặc thiết bị hợp lệ.' });
+    }
+    if (!(0, qrPolicy_1.canCreateQr)(req.user, type))
+        return res.status(403).json({ success: false, message: 'Bạn chưa được cấp quyền tạo QR cho đối tượng này.' });
+    try {
+        return res.json({ success: true, data: await (0, qrPolicy_1.createSavedQr)(type, id, postgresDb_1.PostgresDatabase) });
+    }
+    catch (error) {
+        if (error instanceof qrPolicy_1.QrCreationError)
+            return res.status(error.status).json({ success: false, message: error.message });
+        console.error('Không thể tạo và lưu QR:', error);
+        return res.status(503).json({ success: false, message: 'Không thể tạo và lưu mã QR. Vui lòng thử lại.' });
+    }
+});
+router.get('/qr/generate', auth_1.authenticateToken, async (req, res) => {
+    if (!(0, qrPolicy_1.canCreateQr)(req.user, 'room') && !(0, qrPolicy_1.canCreateQr)(req.user, 'device'))
+        return res.status(403).json({ success: false, message: 'Bạn chưa được cấp quyền tạo QR.' });
     try {
         const text = req.query.text;
         if (!text) {

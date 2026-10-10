@@ -10,6 +10,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
+  "exclude": ["src/data/sqlDb.ts", "src/data/sharedManuals.ts", "src/data/migrateSharedManuals.ts"],
   "include": [
     "src/**/*"
   ]
