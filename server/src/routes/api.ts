@@ -5,28 +5,7 @@ import QRCode from 'qrcode';
 import { PostgresDatabase } from '../data/postgresDb';
 import { authenticateToken, requirePermission, requireRole, optionalAuth, AuthRequest } from './auth';
 import { uploadsDirectory } from '../uploads';
-<<<<<<< Updated upstream
-=======
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 import { createSavedQr, canCreateQr, QrCreationError } from '../qrPolicy';
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
->>>>>>> Stashed changes
 
 const router = Router();
 

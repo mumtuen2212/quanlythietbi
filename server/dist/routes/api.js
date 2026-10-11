@@ -10,28 +10,7 @@ const qrcode_1 = __importDefault(require("qrcode"));
 const postgresDb_1 = require("../data/postgresDb");
 const auth_1 = require("./auth");
 const uploads_1 = require("../uploads");
-<<<<<<< Updated upstream
-=======
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 const qrPolicy_1 = require("../qrPolicy");
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
-=======
->>>>>>> 64fdb63c918a251c7dec6851826f3f6b16932521
->>>>>>> Stashed changes
 const router = (0, express_1.Router)();
 // Multer configuration for file uploads
 const storage = multer_1.default.diskStorage({
