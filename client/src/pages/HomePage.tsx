@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Building2, 
@@ -27,6 +27,8 @@ import { RoutePlannerModal } from '../components/RoutePlannerModal';
 import { RouteResult } from '../services/pathfinding';
 import { findWalkingRoute, RouteLocation } from '../services/campusRouting';
 import { useAuth } from '../context/AuthContext';
+import { SearchInput } from '../components/SearchInput';
+import { matchesSearch, type SearchSuggestion } from '../services/search';
 
 interface HomePageProps {
   isTechnicianMode?: boolean;
@@ -212,19 +214,34 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
   // SỬA LỖI TẠI ĐÂY: Thêm phòng vệ cho rooms.filter
   const safeRoomsList = rooms || [];
+  const roomSearchFields = (room: Room) => [room.room_number, room.name, room.building_code,
+    buildings.find(building => building.id === room.building_id)?.building_code,
+    buildings.find(building => building.id === room.building_id)?.name];
+  const roomSuggestions = useMemo<SearchSuggestion[]>(() => rooms.map(room => ({
+    id: `room-${room.id}`, label: `${room.room_number} — ${room.name}`, value: room.room_number,
+    detail: buildings.find(building => building.id === room.building_id)?.name,
+    keywords: [room.building_code, buildings.find(building => building.id === room.building_id)?.building_code]
+  })), [rooms, buildings]);
+  const mapSuggestions = useMemo<SearchSuggestion[]>(() => [
+    ...roomSuggestions,
+    ...buildings.map(building => ({ id: `building-${building.id}`, label: building.name, value: building.building_code, detail: building.building_code }))
+  ], [roomSuggestions, buildings]);
+  const selectMapSuggestion = (suggestion: SearchSuggestion) => {
+    const room = rooms.find(item => `room-${item.id}` === suggestion.id);
+    if (room) handleSelectRoom(room);
+    else {
+      const building = buildings.find(item => `building-${item.id}` === suggestion.id);
+      if (building) { setSelectedBuildingId(building.id); setSelectedRoom(null); setExpandedBuildingIds(previous => new Set([...previous, building.id])); }
+    }
+  };
   const filteredRooms = safeRoomsList.filter(room => {
     if (!room) return false;
     const matchesBuilding = selectedBuildingId ? room.building_id === selectedBuildingId : true;
-    const matchesSearch = (room.room_number || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
-                          (room.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
-    return matchesBuilding && matchesSearch;
+    return matchesBuilding && matchesSearch(roomSearchFields(room), searchTerm);
   });
   const mapRooms = safeRoomsList.filter(room => {
     if (!room) return false;
-    const normalizedSearch = (searchTerm || '').toLowerCase();
-    return (room.room_number || '').toLowerCase().includes(normalizedSearch) ||
-      (room.name || '').toLowerCase().includes(normalizedSearch) ||
-      (room.building_code || '').toLowerCase().includes(normalizedSearch);
+    return matchesSearch(roomSearchFields(room), searchTerm);
   });
   const campusAreaFor = (code: string) => {
     if (code === 'HT1') return 'HỘI TRƯỜNG';
@@ -392,10 +409,11 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
               </div>
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
+                <SearchInput
+                  suggestions={mapSuggestions}
+                  onSelect={selectMapSuggestion}
                   value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
+                  onChange={setSearchTerm}
                   placeholder="Tìm phòng, tòa nhà..."
                   className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
                 />
@@ -578,11 +596,12 @@ export const HomePage: React.FC<HomePageProps> = ({ isTechnicianMode = false }) 
 
           <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
+            <SearchInput
+              suggestions={mapSuggestions}
+              onSelect={selectMapSuggestion}
               placeholder="Tìm số phòng (vd: A.301, B.201)..."
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
+              onChange={setSearchTerm}
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all shadow-sm"
             />
           </div>

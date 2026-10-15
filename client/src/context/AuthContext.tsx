@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, Permission, RoleName, LoginPayload, RegisterPayload } from '../types';
 import { ApiService } from '../services/api';
+import { beginGoogleBrowserLogin, listenForGoogleBrowserLogin, usesGoogleSystemBrowser } from '../services/mobileGoogle';
 
 interface AuthContextType {
   user: User | null;
@@ -9,6 +10,8 @@ interface AuthContextType {
   isLoading: boolean;
   login: (payload: LoginPayload) => Promise<void>;
   loginWithGoogle: (credential: string) => Promise<void>;
+  loginWithGoogleBrowser: (returnPath: string) => Promise<void>;
+  googleBrowserError: string | null;
   register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
   hasPermission: (permission: Permission) => boolean;
@@ -24,6 +27,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [googleBrowserError, setGoogleBrowserError] = useState<string | null>(null);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -31,13 +35,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (storedToken) {
         try {
           const me = await ApiService.getMe();
-          setUser(me);
-          setToken(storedToken);
+          if (localStorage.getItem(TOKEN_KEY) === storedToken) {
+            setUser(me);
+            setToken(storedToken);
+          }
         } catch (err) {
           console.warn('Session expired or invalid token:', err);
-          localStorage.removeItem(TOKEN_KEY);
-          setUser(null);
-          setToken(null);
+          if (localStorage.getItem(TOKEN_KEY) === storedToken) {
+            localStorage.removeItem(TOKEN_KEY);
+            setUser(null);
+            setToken(null);
+          }
         }
       }
       setIsLoading(false);
@@ -45,6 +53,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     initAuth();
   }, []);
+
+  useEffect(() => {
+    if (!usesGoogleSystemBrowser()) return;
+    const controller = new AbortController();
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    listenForGoogleBrowserLogin((session, returnPath) => {
+      if (disposed) return;
+      localStorage.setItem(TOKEN_KEY, session.token);
+      setToken(session.token);
+      setUser(session.user);
+      setGoogleBrowserError(null);
+      window.location.hash = `#${returnPath}`;
+    }, message => {
+      if (disposed) return;
+      setGoogleBrowserError(message);
+      window.location.hash = '#/login';
+    }, controller.signal).then(remove => { if (disposed) remove(); else cleanup = remove; })
+      .catch(() => { if (!disposed) setGoogleBrowserError('Không thể nhận kết quả Google. Hãy mở lại app.'); });
+    return () => { disposed = true; controller.abort(); cleanup?.(); };
+  }, []);
+
+  const loginWithGoogleBrowser = async (returnPath: string) => {
+    setGoogleBrowserError(null);
+    await beginGoogleBrowserLogin(returnPath);
+  };
 
   const login = async (payload: LoginPayload) => {
     const res = await ApiService.login(payload);
@@ -103,6 +137,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isLoading,
         login,
         loginWithGoogle,
+        loginWithGoogleBrowser,
+        googleBrowserError,
         register,
         logout,
         hasPermission,

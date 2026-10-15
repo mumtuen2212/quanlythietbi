@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { 
   Settings, 
   AlertTriangle, 
@@ -44,6 +44,8 @@ import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { FloorPlanMap } from '../components/FloorPlanMap';
 import { LeafletCampusMap } from '../components/LeafletCampusMap';
+import { SearchInput } from '../components/SearchInput';
+import { matchesSearch } from '../services/search';
 
 export const AdminDashboardPage: React.FC = () => {
   const { user: currentUser, hasPermission, refreshUser } = useAuth();
@@ -662,10 +664,15 @@ export const AdminDashboardPage: React.FC = () => {
     }
   };
 
-  const matchesSearch = (value: unknown, term: string) => String(value || '').toLowerCase().includes(term.trim().toLowerCase());
-  const filteredDevices = devices.filter(device => !deviceSearch.trim() || [device.device_code, device.name, device.model, device.room_name, device.category_name, device.qr_code].some(value => matchesSearch(value, deviceSearch)));
-  const filteredBuildingsAdmin = buildings.filter(building => !buildingSearch.trim() || [building.building_code, building.name, building.description].some(value => matchesSearch(value, buildingSearch)));
-  const filteredRoomsAdmin = rooms.filter(room => !roomSearch.trim() || [room.room_number, room.name, room.building_code, buildings.find(building => building.id === room.building_id)?.name].some(value => matchesSearch(value, roomSearch)));
+  const deviceFields = (device: Device) => [device.device_code, device.name, device.model, device.room_name, device.category_name, device.qr_code];
+  const buildingFields = (building: Building) => [building.building_code, building.name, building.description];
+  const roomFields = (room: Room) => [room.room_number, room.name, room.building_code, buildings.find(building => building.id === room.building_id)?.name];
+  const filteredDevices = devices.filter(device => matchesSearch(deviceFields(device), deviceSearch));
+  const filteredBuildingsAdmin = buildings.filter(building => matchesSearch(buildingFields(building), buildingSearch));
+  const filteredRoomsAdmin = rooms.filter(room => matchesSearch(roomFields(room), roomSearch));
+  const deviceSuggestions = useMemo(() => devices.map(device => ({ id: device.id, label: device.name, value: device.device_code, detail: [device.device_code, device.room_name].filter(Boolean).join(' · '), keywords: deviceFields(device) })), [devices]);
+  const buildingSuggestions = useMemo(() => buildings.map(building => ({ id: building.id, label: building.name, value: building.building_code, detail: building.building_code, keywords: buildingFields(building) })), [buildings]);
+  const roomSuggestions = useMemo(() => rooms.map(room => ({ id: room.id, label: `${room.room_number} — ${room.name}`, value: room.room_number, detail: buildings.find(building => building.id === room.building_id)?.name, keywords: roomFields(room) })), [rooms, buildings]);
 
   const devicesPerPage = 14;
   const deviceTotalPages = Math.max(1, Math.ceil(filteredDevices.length / devicesPerPage));
@@ -694,9 +701,15 @@ export const AdminDashboardPage: React.FC = () => {
   );
 
   const activeReportList = isReporter && reportListView === 'mine' ? mySubmittedReports : reports;
-  const filteredReports = activeReportList.filter(report => !reportSearch.trim() || [report.report_code, report.title, report.description, report.room_name, report.device_name, report.reporter_name].some(value => matchesSearch(value, reportSearch)));
-  const filteredLogs = logs.filter(log => !logSearch.trim() || [log.device_name, log.technician_name, log.action_taken, log.note].some(value => matchesSearch(value, logSearch)));
-  const filteredUsers = usersList.filter(user => !userSearch.trim() || [user.full_name, user.username, user.email, user.phone, user.role_name].some(value => matchesSearch(value, userSearch)));
+  const reportFields = (report: IncidentReport) => [report.report_code, report.title, report.description, report.room_name, report.device_name, report.reporter_name];
+  const logFields = (log: MaintenanceLog) => [log.device_name, log.technician_name, log.action_taken, log.note];
+  const userFields = (user: User) => [user.full_name, user.username, user.email, user.phone, user.role_name];
+  const filteredReports = activeReportList.filter(report => matchesSearch(reportFields(report), reportSearch));
+  const filteredLogs = logs.filter(log => matchesSearch(logFields(log), logSearch));
+  const filteredUsers = usersList.filter(user => matchesSearch(userFields(user), userSearch));
+  const reportSuggestions = useMemo(() => activeReportList.map(report => ({ id: report.id, label: report.title, value: report.report_code, detail: [report.report_code, report.room_name].filter(Boolean).join(' · '), keywords: reportFields(report) })), [activeReportList]);
+  const logSuggestions = useMemo(() => logs.map(log => ({ id: log.id, label: log.action_taken, value: log.action_taken, detail: [log.device_name, log.technician_name].filter(Boolean).join(' · '), keywords: logFields(log) })), [logs]);
+  const userSuggestions = useMemo(() => usersList.map(user => ({ id: user.id, label: user.full_name, value: user.username, detail: user.username, keywords: userFields(user) })), [usersList]);
 
   const reportTotalPages = Math.max(1, Math.ceil(filteredReports.length / 14));
   const currentReportPage = Math.min(reportPage, reportTotalPages);
@@ -841,7 +854,7 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
             <label className="relative w-full sm:w-80">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input value={reportSearch} onChange={e => { setReportSearch(e.target.value); setReportPage(1); }} placeholder="Tìm phiếu báo hỏng..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+              <SearchInput value={reportSearch} suggestions={reportSuggestions} onChange={value => { setReportSearch(value); setReportPage(1); }} placeholder="Tìm phiếu báo hỏng..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
             </label>
           </div>
           {isReporter && (
@@ -955,7 +968,7 @@ export const AdminDashboardPage: React.FC = () => {
             <div className="flex w-full sm:w-auto flex-col sm:flex-row gap-2">
               <label className="relative w-full sm:w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input value={deviceSearch} onChange={e => { setDeviceSearch(e.target.value); setDevicePage(1); }} placeholder="Tìm thiết bị, phòng, mã QR..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+                <SearchInput value={deviceSearch} suggestions={deviceSuggestions} onChange={value => { setDeviceSearch(value); setDevicePage(1); }} placeholder="Tìm thiết bị, phòng, mã QR..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
               </label>
               {canManageDevices && <button type="button" onClick={() => { setDeviceModal({ mode: 'create' }); setShowAddDeviceModal(true); }} className="inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md shadow-sky-600/30 transition-all"><Plus className="w-4 h-4" /><span>Thêm thiết bị</span></button>}
             </div>
@@ -1082,12 +1095,12 @@ export const AdminDashboardPage: React.FC = () => {
               {managementSection === 'buildings' ? (
                 <label className="relative w-full sm:w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input value={buildingSearch} onChange={e => { setBuildingSearch(e.target.value); setBuildingPage(1); }} placeholder="Tìm mã tòa, tên tòa..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+                  <SearchInput value={buildingSearch} suggestions={buildingSuggestions} onChange={value => { setBuildingSearch(value); setBuildingPage(1); }} placeholder="Tìm mã tòa, tên tòa..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
                 </label>
               ) : (
                 <label className="relative w-full sm:w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input value={roomSearch} onChange={e => { setRoomSearch(e.target.value); setRoomPage(1); }} placeholder="Tìm mã phòng, tên phòng, tòa..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+                  <SearchInput value={roomSearch} suggestions={roomSuggestions} onChange={value => { setRoomSearch(value); setRoomPage(1); }} placeholder="Tìm mã phòng, tên phòng, tòa..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
                 </label>
               )}
               {canManageRoomCrud && (
@@ -1218,7 +1231,7 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
             <label className="relative w-full sm:w-80">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input value={logSearch} onChange={e => { setLogSearch(e.target.value); setLogPage(1); }} placeholder="Tìm nhật ký bảo trì..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+              <SearchInput value={logSearch} suggestions={logSuggestions} onChange={value => { setLogSearch(value); setLogPage(1); }} placeholder="Tìm nhật ký bảo trì..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
             </label>
           </div>
           {displayedLogs.map(log => (
@@ -1258,7 +1271,7 @@ export const AdminDashboardPage: React.FC = () => {
             <div className="flex w-full sm:w-auto flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <label className="relative w-full sm:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input value={userSearch} onChange={e => { setUserSearch(e.target.value); setUserPage(1); }} placeholder="Tìm tài khoản..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
+                <SearchInput value={userSearch} suggestions={userSuggestions} onChange={value => { setUserSearch(value); setUserPage(1); }} placeholder="Tìm tài khoản..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-xs outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20" />
               </label>
               <button onClick={loadUsersData} disabled={usersLoading} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /><span>Làm mới</span></button>
               {canManageAccounts && <button onClick={openCreateUser} className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all"><UserPlus className="w-3.5 h-3.5" /><span>Thêm KTV</span></button>}

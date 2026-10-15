@@ -10,11 +10,13 @@ import {
   School
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { usesGoogleSystemBrowser } from '../services/mobileGoogle';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, loginWithGoogle } = useAuth();
+  const { login, loginWithGoogle, loginWithGoogleBrowser, googleBrowserError } = useAuth();
+  const isAndroid = usesGoogleSystemBrowser();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -28,7 +30,7 @@ export const LoginPage: React.FC = () => {
   const from = (location.state as any)?.from?.pathname || '/';
 
   useEffect(() => {
-    if (!googleClientId || !googleButtonRef.current) return;
+    if (isAndroid || !googleClientId || !googleButtonRef.current) return;
 
     const renderGoogleButton = () => {
       if (!window.google || !googleButtonRef.current) return;
@@ -74,7 +76,15 @@ export const LoginPage: React.FC = () => {
     script.onload = renderGoogleButton;
     script.onerror = () => setError('Không thể tải dịch vụ đăng nhập Google.');
     document.head.appendChild(script);
-  }, [from, googleClientId, loginWithGoogle, navigate]);
+  }, [from, googleClientId, loginWithGoogle, navigate, isAndroid]);
+
+  const handleGoogleBrowserLogin = async () => {
+    setLoading(true);
+    setError(null);
+    try { await loginWithGoogleBrowser(from); }
+    catch (err: any) { setError(err.response?.data?.message || err.message || 'Không thể mở đăng nhập Google.'); }
+    finally { setLoading(false); }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,10 +120,10 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {/* Error Alert */}
-        {error && (
+        {(error || googleBrowserError) && (
           <div className="mb-5 flex items-start gap-2.5 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs leading-relaxed">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
-            <span>{error}</span>
+            <span>{error || googleBrowserError}</span>
           </div>
         )}
 
@@ -180,7 +190,15 @@ export const LoginPage: React.FC = () => {
           </button>
         </form>
 
-        {googleClientId ? (
+        {isAndroid ? (
+          <div className="mt-6 border-t border-slate-200 pt-5">
+            <button type="button" onClick={handleGoogleBrowserLogin} disabled={loading}
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              Đăng nhập bằng Google
+            </button>
+            <p className="mt-2 text-center text-xs text-slate-500">Mở trình duyệt để chọn tài khoản, sau đó quay lại app. Nếu đã đóng trình duyệt, bạn có thể bấm lại để thử.</p>
+          </div>
+        ) : googleClientId ? (
           <>
             <div className="flex items-center gap-3 my-6">
               <div className="h-px flex-1 bg-slate-200" />

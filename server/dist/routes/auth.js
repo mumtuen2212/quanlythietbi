@@ -8,12 +8,31 @@ const express_1 = require("express");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const postgresDb_1 = require("../data/postgresDb");
+const googleMobile_1 = require("./googleMobile");
 const router = (0, express_1.Router)();
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
     throw new Error('JWT_SECRET must be configured in the Render environment.');
 }
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+async function createGoogleSession(identity) {
+    let user = await postgresDb_1.PostgresDatabase.getUserByEmail(identity.email);
+    if (!user) {
+        user = await postgresDb_1.PostgresDatabase.createUser({
+            username: `google_${identity.sub}`,
+            password_hash: await bcryptjs_1.default.hash(`google:${identity.sub}:${Date.now()}`, 12),
+            full_name: (identity.name || identity.email.split('@')[0]).slice(0, 150),
+            email: identity.email, phone: '', role_name: 'STUDENT'
+        });
+    }
+    if (!user)
+        throw new Error('Could not create Google account');
+    const token = jsonwebtoken_1.default.sign({ id: user.id, username: user.username, role: user.role_name }, JWT_SECRET, { expiresIn: '7d' });
+    const { password_hash: _, ...safeUser } = user;
+    return { token, user: safeUser };
+}
+// System-browser OAuth is separate from the existing website ID-token login.
+router.use('/google/mobile', (0, googleMobile_1.createMobileGoogleRouter)(createGoogleSession));
 // Authentication Middleware
 const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];

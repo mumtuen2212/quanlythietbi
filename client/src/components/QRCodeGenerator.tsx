@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Download, QrCode, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ApiService } from '../services/api';
 import type { Device, Room } from '../types';
+import { SearchInput } from './SearchInput';
+import { matchesSearch } from '../services/search';
 
 export const QRCodeGenerator: React.FC = () => {
   const { hasPermission } = useAuth();
@@ -29,10 +31,11 @@ export const QRCodeGenerator: React.FC = () => {
     if (!canDevice && type === 'device' && canRoom) setType('room');
   }, [canRoom, canDevice, type]);
   useEffect(() => { setSelectedId(''); setGenerated(null); setSearch(''); }, [type]);
-  if (!canRoom && !canDevice) return null;
   const targets = type === 'room' ? rooms : devices;
   const label = (item: Room | Device) => 'room_number' in item ? `${item.room_number} — ${item.name}` : `${item.device_code} — ${item.name}${item.room_name ? ` (${item.room_name})` : ''}`;
-  const filtered = targets.filter(item => String(item.id) === selectedId || label(item).toLocaleLowerCase('vi').includes(search.trim().toLocaleLowerCase('vi')));
+  const suggestions = useMemo(() => targets.map(item => ({ id: item.id, label: label(item), value: 'room_number' in item ? item.room_number : item.device_code })), [targets]);
+  if (!canRoom && !canDevice) return null;
+  const filtered = targets.filter(item => String(item.id) === selectedId || matchesSearch([label(item)], search));
   const generate = async () => {
     setSaving(true); setError(''); setGenerated(null);
     try { setGenerated(await ApiService.createQrCode(type, Number(selectedId))); }
@@ -53,7 +56,7 @@ export const QRCodeGenerator: React.FC = () => {
       {(['room', 'device'] as const).filter(t => t === 'room' ? canRoom : canDevice).map(t => <button type="button" key={t} disabled={saving} onClick={() => setType(t)} className={`rounded-xl px-4 py-2 text-sm font-bold ${type === t ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700'}`}>{t === 'room' ? 'QR phòng' : 'QR thiết bị'}</button>)}
       <button type="button" onClick={() => void load()} disabled={loading || saving} className="ml-auto text-xs font-semibold text-sky-700 flex items-center gap-1"><RefreshCw size={14} />Tải lại danh sách</button>
     </div>
-    <label className="block text-sm font-semibold">Tìm {type === 'room' ? 'phòng' : 'thiết bị'}<input value={search} disabled={saving} onChange={e => setSearch(e.target.value)} placeholder="Nhập mã hoặc tên..." className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" /></label>
+    <label className="block text-sm font-semibold">Tìm {type === 'room' ? 'phòng' : 'thiết bị'}<SearchInput value={search} suggestions={suggestions} disabled={saving} onChange={setSearch} onSelect={item => { setSelectedId(String(item.id)); setGenerated(null); }} placeholder="Nhập mã hoặc tên..." className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal" /></label>
     <label className="block text-sm font-semibold">Chọn {type === 'room' ? 'phòng' : 'thiết bị'}<select value={selectedId} disabled={loading || saving} onChange={e => { setSelectedId(e.target.value); setGenerated(null); }} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-3 font-normal"><option value="">{loading ? 'Đang tải...' : '-- Chọn đối tượng --'}</option>{filtered.map(item => <option key={item.id} value={item.id}>{label(item)}</option>)}</select></label>
     {!loading && !error && targets.length === 0 && <p className="text-sm text-amber-700">Chưa có dữ liệu trong danh sách này.</p>}
     {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}

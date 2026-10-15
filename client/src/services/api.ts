@@ -39,6 +39,14 @@ api.interceptors.request.use((config) => {
 });
 
 export const ApiService = {
+  startGoogleBrowserLogin: async (challenge: string): Promise<{ state: string; authorizationUrl: string }> => {
+    const res = await api.post('/auth/google/mobile/start', { code_challenge: challenge });
+    return res.data.data;
+  },
+  exchangeGoogleBrowserLogin: async (code: string, state: string, verifier: string): Promise<AuthResponse> => {
+    const res = await api.post('/auth/google/mobile/exchange', { code, state, code_verifier: verifier });
+    return res.data.data;
+  },
   createQrCode: async (type: 'room' | 'device', id: number): Promise<{ type: 'room' | 'device'; id: number; code: string; name: string }> => {
     const res = await api.post('/qr/create', { type, id });
     return res.data.data;

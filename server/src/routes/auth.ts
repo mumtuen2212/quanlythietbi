@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PostgresDatabase } from '../data/postgresDb';
 import { User, Permission, RoleName } from '../data/types';
+import { createMobileGoogleRouter } from './googleMobile';
+import { GoogleIdentity } from '../auth/mobileGoogle';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -10,6 +12,25 @@ if (!JWT_SECRET) {
   throw new Error('JWT_SECRET must be configured in the Render environment.');
 }
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+
+async function createGoogleSession(identity: GoogleIdentity) {
+  let user = await PostgresDatabase.getUserByEmail(identity.email);
+  if (!user) {
+    user = await PostgresDatabase.createUser({
+      username: `google_${identity.sub}`,
+      password_hash: await bcrypt.hash(`google:${identity.sub}:${Date.now()}`, 12),
+      full_name: (identity.name || identity.email.split('@')[0]).slice(0, 150),
+      email: identity.email, phone: '', role_name: 'STUDENT'
+    });
+  }
+  if (!user) throw new Error('Could not create Google account');
+  const token = jwt.sign({ id: user.id, username: user.username, role: user.role_name }, JWT_SECRET!, { expiresIn: '7d' });
+  const { password_hash: _, ...safeUser } = user;
+  return { token, user: safeUser };
+}
+
+// System-browser OAuth is separate from the existing website ID-token login.
+router.use('/google/mobile', createMobileGoogleRouter(createGoogleSession));
 
 // Extend Express Request to include user
 export interface AuthRequest extends Request {

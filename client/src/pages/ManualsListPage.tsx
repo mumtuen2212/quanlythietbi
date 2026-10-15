@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   BookOpen, 
@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { ApiService } from '../services/api';
 import { Manual, DeviceCategory } from '../types';
+import { SearchInput } from '../components/SearchInput';
+import { matchesSearch } from '../services/search';
 
 export const ManualsListPage: React.FC = () => {
   const [manuals, setManuals] = useState<Manual[]>([]);
@@ -42,11 +44,12 @@ export const ManualsListPage: React.FC = () => {
     }
   };
 
+  const manualSuggestions = useMemo(() => manuals.filter(m => !selectedCatId || m.category_id === selectedCatId).map(m => ({
+    id: m.id, label: m.title, value: m.title, detail: m.summary, keywords: [m.category_name, m.applicable_model]
+  })), [manuals, selectedCatId]);
   const filteredManuals = manuals.filter(m => {
     const matchesCategory = selectedCatId ? m.category_id === selectedCatId : true;
-    const matchesSearch = m.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          m.summary.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesCategory && matchesSearch;
+    return matchesCategory && matchesSearch([m.title, m.summary, m.category_name, m.applicable_model], searchTerm);
   });
 
   return (
@@ -70,11 +73,11 @@ export const ManualsListPage: React.FC = () => {
         <div className="pt-2 max-w-md">
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
+            <SearchInput
+              suggestions={manualSuggestions}
               placeholder="Tìm hướng dẫn (vd: mic sisu xanh, kết nối máy chiếu...)"
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
+              onChange={setSearchTerm}
               className="w-full pl-10 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-400 backdrop-blur"
             />
           </div>

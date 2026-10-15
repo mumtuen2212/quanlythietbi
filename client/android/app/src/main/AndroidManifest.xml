@@ -22,6 +22,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Browser OAuth return only. A one-time code + app proof is required. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="quanlythietbi" android:host="auth" android:path="/google" />
+            </intent-filter>
+
         </activity>
 
         <provider
