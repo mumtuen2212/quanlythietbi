@@ -92,7 +92,7 @@ const createPoiIcon = (poi: CampusPOI) => L.divIcon({
 });
 
 
-const createRoomIcon = (room: Room, isSelected: boolean) => L.divIcon({
+const createRoomIcon = (room: Room, isSelected: boolean, isBeingEdited = false) => L.divIcon({
   className: 'custom-room-marker',
   html: `
     <div style="
@@ -107,7 +107,7 @@ const createRoomIcon = (room: Room, isSelected: boolean) => L.divIcon({
       font-weight: 800;
       text-align: center;
       white-space: nowrap;
-      transform: translate(-50%, -50%);
+      transform: translate(-50%, ${isBeingEdited ? '-145%' : '-50%'});
     ">${room.room_number}</div>
   `,
   iconSize: [0, 0],
@@ -169,6 +169,10 @@ interface LeafletCampusMapProps {
   pickModeMessage?: string;
   onPickBuilding?: (buildingId: number, coords: { lat: number; lng: number }) => void;
   onPickMapPosition?: (coords: { lat: number; lng: number }) => void;
+  draggableBuildingId?: number | null;
+  draggableRoomId?: number | null;
+  onDragBuilding?: (coords: { lat: number; lng: number }) => void;
+  onDragRoom?: (coords: { lat: number; lng: number }) => void;
 }
 
 // Controller to smoothly pan to selected building
@@ -244,7 +248,11 @@ export const LeafletCampusMap: React.FC<LeafletCampusMapProps> = ({
   pickMode = false,
   pickModeMessage,
   onPickBuilding,
-  onPickMapPosition
+  onPickMapPosition,
+  draggableBuildingId = null,
+  draggableRoomId = null,
+  onDragBuilding,
+  onDragRoom
 }) => {
     const [activeBuildingId, setActiveBuildingId] = useState<number | null>(selectedBuildingId);
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
@@ -347,14 +355,23 @@ export const LeafletCampusMap: React.FC<LeafletCampusMapProps> = ({
               key={`bldg-${bldg.id}`}
               position={coords}
               icon={createBuildingIcon(bldg, pendingCount > 0, isSelected)}
+              draggable={pickMode && bldg.id === draggableBuildingId && Boolean(onDragBuilding)}
               eventHandlers={{
                 click: () => {
                   setActiveBuildingId(bldg.id);
+                  // A draggable marker is for repositioning; do not let its
+                  // click handler overwrite the new drag position with the old one.
+                  if (pickMode && bldg.id === draggableBuildingId && onDragBuilding) return;
                   if (pickMode && onPickMapPosition) {
                     onPickMapPosition({ lat: coords[0], lng: coords[1] });
                   } else if (pickMode && onPickBuilding) {
                     onPickBuilding(bldg.id, { lat: coords[0], lng: coords[1] });
                   }
+                },
+                dragend: event => {
+                  if (bldg.id !== draggableBuildingId || !onDragBuilding) return;
+                  const position = event.target.getLatLng();
+                  onDragBuilding({ lat: position.lat, lng: position.lng });
                 }
               }}
             >
@@ -526,9 +543,17 @@ export const LeafletCampusMap: React.FC<LeafletCampusMapProps> = ({
             <Marker
               key={`selected-room-reference-${room.id}`}
               position={position}
-              icon={isSelected ? createRoomIcon(room, true) : createRoomReferenceIcon()}
+              icon={isSelected ? createRoomIcon(room, true, pickMode && room.id === draggableRoomId) : createRoomReferenceIcon()}
               zIndexOffset={isSelected ? 900 : 500}
-              eventHandlers={{ click: () => onSelectRoom?.(room) }}
+              draggable={pickMode && room.id === draggableRoomId && Boolean(onDragRoom)}
+              eventHandlers={{
+                click: () => onSelectRoom?.(room),
+                dragend: event => {
+                  if (room.id !== draggableRoomId || !onDragRoom) return;
+                  const draggedPosition = event.target.getLatLng();
+                  onDragRoom({ lat: draggedPosition.lat, lng: draggedPosition.lng });
+                }
+              }}
             >
               <Popup>
                 <div className="min-w-[160px] p-1">

@@ -612,6 +612,21 @@ export const AdminDashboardPage: React.FC = () => {
     setShowRoomMapPicker(false);
   };
 
+  const handleBuildingMapPick = ({ lat, lng }: { lat: number; lng: number }) => {
+    const x = Math.round(Math.max(0, Math.min(1000, (lng - 106.6732) / 0.000006)));
+    const y = Math.round(Math.max(0, Math.min(700, (10.9822 - lat) / 0.000006)));
+    setBuildingForm(previous => ({
+      ...previous,
+      x: String(x),
+      y: String(y),
+      entrance_x: String(x),
+      entrance_y: String(y),
+      latitude: String(lat),
+      longitude: String(lng)
+    }));
+    setShowBuildingMapPicker(false);
+  };
+
   const handleFloorPlanMapPick = (event: React.MouseEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const ratioX = (event.clientX - rect.left) / rect.width;
@@ -630,9 +645,20 @@ export const AdminDashboardPage: React.FC = () => {
 
   const handleMoveRoomOnFloorPlan = async (room: Room, position: Pick<Room, 'x' | 'y' | 'width' | 'height' | 'door_x' | 'door_y'>) => {
     const previousRoom = rooms.find(item => item.id === room.id);
-    setRooms(previous => previous.map(item => item.id === room.id ? { ...item, ...position } : item));
+    const building = buildings.find(item => item.id === room.building_id);
+    const [buildingLat, buildingLng] = building && Number.isFinite(building.latitude) && Number.isFinite(building.longitude)
+      ? [Number(building.latitude), Number(building.longitude)]
+      : [10.9822 - (building?.y ?? 350) * 0.000006, 106.6732 + (building?.x ?? 500) * 0.000006];
+    // Keep the floor-plan placement and campus-map location in sync. The room
+    // editor uses the inverse transform when a point is picked on the map.
+    const coordinates = {
+      latitude: buildingLat + (160 - position.y) / 1400000,
+      longitude: buildingLng + (position.x - 450) / 1800000
+    };
+    const updatedPosition = { ...position, ...coordinates };
+    setRooms(previous => previous.map(item => item.id === room.id ? { ...item, ...updatedPosition } : item));
     try {
-      await ApiService.updateRoom(room.id, position);
+      await ApiService.updateRoom(room.id, updatedPosition);
     } catch (error: any) {
       if (previousRoom) setRooms(previous => previous.map(item => item.id === room.id ? previousRoom : item));
       window.alert(error.response?.data?.message || 'Không thể lưu vị trí phòng. Vui lòng thử lại.');
@@ -1627,7 +1653,7 @@ export const AdminDashboardPage: React.FC = () => {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-extrabold text-sky-800">Chọn vị trí trực tiếp trên bản đồ</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Bấm đúng nơi muốn đặt tòa nhà; tọa độ sẽ tự điền.</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Bấm bản đồ hoặc kéo ghim tòa nhà đến vị trí mới.</p>
                   </div>
                   <button type="button" onClick={() => setShowBuildingMapPicker(value => !value)} className="shrink-0 rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-sky-700">
                     {showBuildingMapPicker ? 'Ẩn bản đồ' : 'Chọn trên bản đồ'}
@@ -1642,12 +1668,9 @@ export const AdminDashboardPage: React.FC = () => {
                       selectedBuildingId={null}
                       onSelectBuilding={() => undefined}
                       pickMode
-                      onPickMapPosition={({ lat, lng }) => {
-                        const x = Math.round(Math.max(0, Math.min(1000, (lng - 106.6732) / 0.000006)));
-                        const y = Math.round(Math.max(0, Math.min(700, (10.9822 - lat) / 0.000006)));
-                        setBuildingForm(previous => ({ ...previous, x: String(x), y: String(y), entrance_x: String(x), entrance_y: String(y), latitude: String(lat), longitude: String(lng) }));
-                        setShowBuildingMapPicker(false);
-                      }}
+                      draggableBuildingId={editingBuilding?.id ?? null}
+                      onPickMapPosition={handleBuildingMapPick}
+                      onDragBuilding={handleBuildingMapPick}
                     />
                   </div>
                 )}
@@ -1740,7 +1763,7 @@ export const AdminDashboardPage: React.FC = () => {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <span className="text-[11px] font-extrabold text-sky-800">Chọn vị trí phòng</span>
-                    <p className="text-[10px] text-slate-500 mt-1">Bấm trên bản đồ hoặc sơ đồ tầng để lấy x:y.</p>
+                    <p className="text-[10px] text-slate-500 mt-1">Bấm bản đồ hoặc kéo ghim phòng để cập nhật tọa độ.</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-bold text-slate-700">{roomForm.latitude ? `${roomForm.latitude}, ${roomForm.longitude}` : `x:${roomForm.x} · y:${roomForm.y}`}</span>
@@ -1760,12 +1783,20 @@ export const AdminDashboardPage: React.FC = () => {
                     <LeafletCampusMap
                       buildings={buildings}
                       pois={[]}
-                      rooms={[]}
                       selectedBuildingId={Number(roomForm.building_id) || null}
                       onSelectBuilding={() => undefined}
                       pickMode
-                      pickModeMessage="Bấm gần tòa đã chọn để lấy vị trí phòng"
+                      pickModeMessage="Ghim phòng và tòa đang hiện trên bản đồ — kéo ghim phòng để đổi vị trí"
+                      rooms={roomModal?.mode === 'edit' && roomModal.room
+                        ? rooms.filter(room => room.id === roomModal.room?.id || (
+                          room.building_id === roomModal.room?.building_id && room.floor === roomModal.room?.floor
+                        ))
+                        : []}
+                      selectedRoom={roomModal?.mode === 'edit' ? roomModal.room : null}
+                      showCampusEntities={false}
+                      draggableRoomId={roomModal?.mode === 'edit' ? roomModal.room?.id ?? null : null}
                       onPickMapPosition={handleRoomMapPick}
+                      onDragRoom={handleRoomMapPick}
                     />
                   </div>
                 )}

@@ -361,9 +361,24 @@ export class PostgresDatabase {
       UPDATE dbo.ToaNha SET
         MaToaNha = COALESCE(@building_code, MaToaNha), TenToaNha = COALESCE(@name, TenToaNha),
         MoTa = COALESCE(@description, MoTa), SoTang = COALESCE(@floors, SoTang), MauSac = COALESCE(@color, MauSac),
+        X = COALESCE(@x, X), Y = COALESCE(@y, Y),
+        XiengVaoX = COALESCE(@entrance_x, XiengVaoX), XiengVaoY = COALESCE(@entrance_y, XiengVaoY),
         Latitude = COALESCE(@latitude, Latitude), Longitude = COALESCE(@longitude, Longitude)
       WHERE ToaNhaID = @id
-    `, { id, building_code: payload.building_code ?? null, name: payload.name ?? null, description: payload.description ?? null, floors: payload.floors ?? null, color: payload.color ?? null, latitude: payload.latitude ?? null, longitude: payload.longitude ?? null });
+    `, {
+      id,
+      building_code: payload.building_code ?? null,
+      name: payload.name ?? null,
+      description: payload.description ?? null,
+      floors: payload.floors ?? null,
+      color: payload.color ?? null,
+      x: payload.x ?? null,
+      y: payload.y ?? null,
+      entrance_x: payload.entrance_x ?? null,
+      entrance_y: payload.entrance_y ?? null,
+      latitude: payload.latitude ?? null,
+      longitude: payload.longitude ?? null
+    });
     return PostgresDatabase.getBuildingById(id);
   }
 
