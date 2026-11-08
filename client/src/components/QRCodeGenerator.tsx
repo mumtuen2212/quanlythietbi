@@ -4,7 +4,13 @@ import { Download, QrCode, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ApiService } from '../services/api';
 import type { Device, Room } from '../types';
-import { matchesSearch } from '../services/search';
+
+const normalizeSearchText = (value: unknown) => String(value ?? '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[đĐ]/g, 'd')
+  .toLowerCase()
+  .trim();
 
 export const QRCodeGenerator: React.FC = () => {
   const { hasPermission } = useAuth();
@@ -32,7 +38,10 @@ export const QRCodeGenerator: React.FC = () => {
   useEffect(() => { setSelectedId(''); setGenerated(null); setSearch(''); }, [type]);
   const targets = type === 'room' ? rooms : devices;
   const label = (item: Room | Device) => 'room_number' in item ? `${item.room_number} — ${item.name}` : `${item.device_code} — ${item.name}${item.room_name ? ` (${item.room_name})` : ''}`;
-  const filtered = useMemo(() => targets.filter(item => matchesSearch([label(item)], search)), [targets, search]);
+  const filtered = useMemo(() => {
+    const query = normalizeSearchText(search);
+    return targets.filter(item => !query || normalizeSearchText(label(item)).includes(query));
+  }, [targets, search]);
   const visibleTargets = filtered.slice(0, 8);
   const selectedTarget = targets.find(item => String(item.id) === selectedId);
   if (!canRoom && !canDevice) return null;
